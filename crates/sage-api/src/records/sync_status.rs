@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
+
 
 use crate::{Amount, Unit};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncStatus {
     pub balance: Amount,
     pub unit: Unit,

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NftRecord {
     pub launcher_id: String,
     pub collection_id: Option<String>,
@@ -16,7 +16,7 @@ pub struct NftRecord {
     pub data: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NftInfo {
     pub launcher_id: String,
     pub collection_id: Option<String>,

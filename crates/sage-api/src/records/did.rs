@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
+
 
 use crate::Amount;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DidRecord {
     pub launcher_id: String,
     pub name: Option<String>,

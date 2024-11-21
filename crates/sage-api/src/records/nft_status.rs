@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct NftStatus {
     pub nfts: u32,
     pub visible_nfts: u32,

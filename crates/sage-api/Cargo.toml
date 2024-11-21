@@ -15,9 +15,7 @@ categories = { workspace = true }
 workspace = true
 
 [dependencies]
-serde = { workspace = true }
-tauri-specta = { workspace = true }
-specta = { workspace = true, features = ["derive", "bigdecimal"] }
+serde = { workspace = true } 
 bigdecimal = { workspace = true, features = ["serde"] }
 once_cell = { workspace = true }
 num-traits = { workspace = true }

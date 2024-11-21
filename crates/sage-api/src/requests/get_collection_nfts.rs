@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
+
 
 use super::NftSortMode;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetCollectionNfts {
     pub collection_id: Option<String>,
     pub offset: u32,

@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
+
 
 use crate::Amount;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoinRecord {
     pub coin_id: String,
     pub address: String,

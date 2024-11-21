@@ -1,4 +1,4 @@
-use specta::specta;
+ 
 
 use crate::{app_state::AppState, error::Result, state::State};
 

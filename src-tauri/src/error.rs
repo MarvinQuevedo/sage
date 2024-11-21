@@ -17,13 +17,13 @@ use sage_database::DatabaseError;
 use sage_keychain::KeychainError;
 use sage_wallet::{SyncCommand, UriError, WalletError};
 use serde::{Deserialize, Serialize};
-use specta::Type;
+
 use sqlx::migrate::MigrateError;
 use tokio::sync::{mpsc, oneshot::error::RecvError};
 use tracing::metadata::ParseLevelError;
 use tracing_subscriber::util::TryInitError;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Error {
     kind: ErrorKind,
     reason: String,
@@ -143,7 +143,7 @@ impl Error {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum ErrorKind {
     Io,
     Database,

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Type)]
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GetNftCollections {
     pub offset: u32,
     pub limit: u32,

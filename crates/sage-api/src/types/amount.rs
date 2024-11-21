@@ -3,9 +3,9 @@ use std::fmt;
 use bigdecimal::BigDecimal;
 use num_traits::ToPrimitive;
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Amount(BigDecimal);
 
 impl Amount {

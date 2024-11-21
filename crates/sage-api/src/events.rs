@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use specta::Type;
 
 
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncEvent {
     Start { ip: String },
