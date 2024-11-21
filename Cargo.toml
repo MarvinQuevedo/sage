@@ -57,16 +57,11 @@ toml = "0.8.19"
 hex = "0.4.3"
 bigdecimal = "0.4.5"
 base64 = "0.22.1"
-
-# Tauri
-tauri = "2.1.0"
-tauri-plugin-clipboard-manager = "2.0.2"
-tauri-plugin-shell = "2.0.2"
-tauri-build = "2.0.3"
+ 
 
 # Specta
 specta = "2.0.0-rc.20"
-specta-typescript = "0.0.7"
+specta-typescript = "0.0.7" 
 tauri-specta = "2.0.0-rc.20"
 
 # Chia
