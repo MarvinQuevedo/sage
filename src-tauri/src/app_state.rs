@@ -17,16 +17,14 @@ use sage_wallet::{PeerState, SyncCommand, SyncEvent, SyncManager, SyncOptions, T
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
     ConnectOptions,
-};
-use tauri::{AppHandle, Emitter};
+}; 
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{error, info, Level};
 use tracing_appender::rolling::{Builder, Rotation};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use crate::{
-    error::{Error, Result},
-    models::{WalletInfo, WalletKind},
+    app_handler::AppHandle, error::{Error, Result}, models::{WalletInfo, WalletKind}
 };
 
 pub type AppState = Mutex<AppStateInner>;
@@ -239,7 +237,7 @@ impl AppStateInner {
                     SyncEvent::DidInfo => ApiEvent::DidInfo,
                     SyncEvent::NftData => ApiEvent::NftData,
                 };
-                if app_handle.emit("sync-event", event).is_err() {
+                if app_handle.emit("sync-event", event).await.is_err() {
                     break;
                 }
             }
@@ -308,7 +306,7 @@ impl AppStateInner {
                 )
                 .await?;
 
-            sqlx::migrate!("../migrations").run(&pool).await?;
+              sqlx::migrate!("../migrations").run(&pool).await?;
         }
 
         let db = Database::new(pool);

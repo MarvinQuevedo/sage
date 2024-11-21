@@ -11,25 +11,23 @@ use sage_api::{
 use sage_wallet::{
     calculate_royalties, fetch_nft_offer_details, insert_transaction, parse_locked_coins,
     parse_offer_payments, MakerSide, NftRoyaltyInfo, SyncCommand, TakerSide, Transaction, Wallet,
-};
-use specta::specta;
-use tauri::{command, State};
+}; 
 use tokio::sync::MutexGuard;
 
 use crate::{
     app_state::{AppState, AppStateInner},
-    error::{Error, Result},
+    error::{Error, Result}, state::State,
 };
 
 use super::{extract_nft_data, ConfirmationInfo};
 
-#[command]
-#[specta]
-pub async fn make_offer(state: State<'_, AppState>, request: MakeOffer) -> Result<String> {
-    let state = state.lock().await;
-    let wallet = state.wallet()?;
 
-    let Some(offered_xch) = request.offered_assets.xch.to_mojos(state.unit.decimals) else {
+pub async fn make_offer(state: State<AppState>, request: MakeOffer) -> Result<String> {
+    let state = state.lock().await;
+    let inner_state = state.lock().await;
+    let wallet = inner_state.wallet()?;
+
+    let Some(offered_xch) = request.offered_assets.xch.to_mojos(inner_state.unit.decimals) else {
         return Err(Error::invalid_amount(&request.offered_assets.xch));
     };
 
@@ -55,7 +53,7 @@ pub async fn make_offer(state: State<'_, AppState>, request: MakeOffer) -> Resul
         offered_nfts.push(launcher_id.into());
     }
 
-    let Some(requested_xch) = request.requested_assets.xch.to_mojos(state.unit.decimals) else {
+    let Some(requested_xch) = request.requested_assets.xch.to_mojos(inner_state.unit.decimals) else {
         return Err(Error::invalid_amount(&request.requested_assets.xch));
     };
 
@@ -74,7 +72,7 @@ pub async fn make_offer(state: State<'_, AppState>, request: MakeOffer) -> Resul
 
     for nft_id in request.requested_assets.nfts {
         if peer.is_none() {
-            peer = state.peer_state.lock().await.acquire_peer();
+            peer = inner_state.peer_state.lock().await.acquire_peer();
         }
 
         let peer = peer.as_ref().ok_or(Error::no_peers())?;
@@ -93,7 +91,7 @@ pub async fn make_offer(state: State<'_, AppState>, request: MakeOffer) -> Resul
         requested_nfts.insert(nft_id, offer_details);
     }
 
-    let Some(fee) = request.fee.to_mojos(state.unit.decimals) else {
+    let Some(fee) = request.fee.to_mojos(inner_state.unit.decimals) else {
         return Err(Error::invalid_amount(&request.fee));
     };
 
@@ -115,7 +113,7 @@ pub async fn make_offer(state: State<'_, AppState>, request: MakeOffer) -> Resul
         )
         .await?;
 
-    let (_mnemonic, Some(master_sk)) = state.keychain.extract_secrets(wallet.fingerprint, b"")?
+    let (_mnemonic, Some(master_sk)) = inner_state.keychain.extract_secrets(wallet.fingerprint, b"")?
     else {
         return Err(Error::no_secret_key());
     };
@@ -123,7 +121,7 @@ pub async fn make_offer(state: State<'_, AppState>, request: MakeOffer) -> Resul
     let offer = wallet
         .sign_make_offer(
             unsigned,
-            &if state.config.network.network_id == "mainnet" {
+            &if inner_state.config.network.network_id == "mainnet" {
                 AggSigConstants::new(MAINNET_CONSTANTS.agg_sig_me_additional_data)
             } else {
                 AggSigConstants::new(TESTNET11_CONSTANTS.agg_sig_me_additional_data)
@@ -135,21 +133,21 @@ pub async fn make_offer(state: State<'_, AppState>, request: MakeOffer) -> Resul
     Ok(offer.encode()?)
 }
 
-#[command]
-#[specta]
-pub async fn take_offer(state: State<'_, AppState>, offer: String, fee: Amount) -> Result<()> {
+
+pub async fn take_offer(state: State<AppState>, offer: String, fee: Amount) -> Result<()> {
     let state = state.lock().await;
-    let wallet = state.wallet()?;
+    let inner_state = state.lock().await;
+    let wallet = inner_state.wallet()?;
 
     let offer = Offer::decode(&offer)?;
 
-    let Some(fee) = fee.to_mojos(state.unit.decimals) else {
+    let Some(fee) = fee.to_mojos(inner_state.unit.decimals) else {
         return Err(Error::invalid_amount(&fee));
     };
 
     let unsigned = wallet.take_offer(offer, fee, false, true).await?;
 
-    let (_mnemonic, Some(master_sk)) = state.keychain.extract_secrets(wallet.fingerprint, b"")?
+    let (_mnemonic, Some(master_sk)) = inner_state.keychain.extract_secrets(wallet.fingerprint, b"")?
     else {
         return Err(Error::no_secret_key());
     };
@@ -157,7 +155,7 @@ pub async fn take_offer(state: State<'_, AppState>, offer: String, fee: Amount) 
     let spend_bundle = wallet
         .sign_take_offer(
             unsigned,
-            &if state.config.network.network_id == "mainnet" {
+            &if inner_state.config.network.network_id == "mainnet" {
                 AggSigConstants::new(MAINNET_CONSTANTS.agg_sig_me_additional_data)
             } else {
                 AggSigConstants::new(TESTNET11_CONSTANTS.agg_sig_me_additional_data)
@@ -178,7 +176,7 @@ pub async fn take_offer(state: State<'_, AppState>, offer: String, fee: Amount) 
 
     tx.commit().await?;
 
-    state
+    inner_state
         .command_sender
         .send(SyncCommand::SubscribeCoins {
             coin_ids: subscriptions,
@@ -188,16 +186,16 @@ pub async fn take_offer(state: State<'_, AppState>, offer: String, fee: Amount) 
     Ok(())
 }
 
-#[command]
-#[specta]
-pub async fn view_offer(state: State<'_, AppState>, offer: String) -> Result<OfferSummary> {
+
+pub async fn view_offer(state: State<AppState>, offer: String) -> Result<OfferSummary> {
     let state = state.lock().await;
-    let wallet = state.wallet()?;
-    summarize_offer(&state, &wallet, Offer::decode(&offer)?).await
+    let inner_state = state.lock().await;
+    let wallet = inner_state.wallet()?;
+    summarize_offer(&inner_state, &wallet, Offer::decode(&offer)?).await
 }
 
 async fn summarize_offer(
-    state: &MutexGuard<'_, AppStateInner>,
+    inner_state: &MutexGuard<'_, AppStateInner>,
     wallet: &Wallet,
     offer: Offer,
 ) -> Result<OfferSummary> {
@@ -242,8 +240,8 @@ async fn summarize_offer(
 
     let mut maker = OfferAssets {
         xch: OfferXch {
-            amount: Amount::from_mojos(maker_amounts.xch as u128, state.unit.decimals),
-            royalty: Amount::from_mojos(maker_royalties.xch as u128, state.unit.decimals),
+            amount: Amount::from_mojos(maker_amounts.xch as u128, inner_state.unit.decimals),
+            royalty: Amount::from_mojos(maker_royalties.xch as u128, inner_state.unit.decimals),
         },
         cats: IndexMap::new(),
         nfts: IndexMap::new(),
@@ -291,8 +289,8 @@ async fn summarize_offer(
 
     let mut taker = OfferAssets {
         xch: OfferXch {
-            amount: Amount::from_mojos(taker_amounts.xch as u128, state.unit.decimals),
-            royalty: Amount::from_mojos(taker_royalties.xch as u128, state.unit.decimals),
+            amount: Amount::from_mojos(taker_amounts.xch as u128, inner_state.unit.decimals),
+                royalty: Amount::from_mojos(taker_royalties.xch as u128, inner_state.unit.decimals),
         },
         cats: IndexMap::new(),
         nfts: IndexMap::new(),
@@ -339,7 +337,7 @@ async fn summarize_offer(
     }
 
     Ok(OfferSummary {
-        fee: Amount::from_mojos(locked_coins.fee as u128, state.unit.decimals),
+        fee: Amount::from_mojos(locked_coins.fee as u128, inner_state.unit.decimals),
         maker,
         taker,
     })

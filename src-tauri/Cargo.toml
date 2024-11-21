@@ -1,5 +1,5 @@
 [package]
-name = "sage-tauri"
+name = "sage"
 version = "0.7.0"
 description = "A next generation Chia wallet."
 authors = ["Rigidity <me@rigidnetwork.com>"]
@@ -12,7 +12,7 @@ workspace = true
 
 [lib]
 name = "sage_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 sage-api = { workspace = true }
@@ -21,14 +21,11 @@ sage-database = { workspace = true }
 sage-keychain = { workspace = true }
 sage-wallet = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-tauri = { workspace = true, features = [] }
-tauri-specta = { workspace = true, features = ["derive", "typescript"] }
 specta = { workspace = true }
 specta-typescript = { workspace = true }
 bip39 = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-tauri-plugin-clipboard-manager = { workspace = true }
 tokio = { workspace = true }
 bincode = { workspace = true }
 toml = { workspace = true, features = ["preserve_order"] }
@@ -46,19 +43,10 @@ tracing-appender = { workspace = true }
 log = { workspace = true }
 bigdecimal = { workspace = true }
 bech32 = { workspace = true }
-base64 = { workspace = true }
-tauri-plugin-shell = { workspace = true }
+base64 = { workspace = true } 
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
-
-# This is to ensure that the bindgen feature is enabled for the aws-lc-rs crate.
-# https://aws.github.io/aws-lc-rs/platform_support.html#tested-platforms
 aws-lc-rs = { version = "1", features = ["bindgen"] }
 
-[build-dependencies]
-tauri-build = { workspace = true, features = [] }
 
 [package.metadata.cargo-machete]
 ignored = ["serde_json", "aws-lc-rs"]
-
-[patch.crates-io]
-chia-wallet-sdk = { git = "https://github.com/xch-dev/chia-wallet-sdk", rev = "2cf81a1df37eaf94dda9fed74785f30ec24669f2" }

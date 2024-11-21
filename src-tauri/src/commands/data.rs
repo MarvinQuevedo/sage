@@ -14,18 +14,16 @@ use sage_api::{
     SyncStatus,
 };
 use sage_database::{NftData, NftRow};
-use sage_wallet::WalletError;
-use specta::specta;
-use tauri::{command, State};
+use sage_wallet::WalletError; 
 
 use crate::{
     app_state::AppState,
     error::{Error, Result},
+    state::State,
 };
 
-#[command]
-#[specta]
-pub async fn get_addresses(state: State<'_, AppState>) -> Result<Vec<String>> {
+pub async fn get_addresses(state: State<AppState>) -> Result<Vec<String>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -43,9 +41,8 @@ pub async fn get_addresses(state: State<'_, AppState>) -> Result<Vec<String>> {
     Ok(addresses)
 }
 
-#[command]
-#[specta]
-pub async fn get_sync_status(state: State<'_, AppState>) -> Result<SyncStatus> {
+pub async fn get_sync_status(state: State<AppState>) -> Result<SyncStatus> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -76,9 +73,8 @@ pub async fn get_sync_status(state: State<'_, AppState>) -> Result<SyncStatus> {
     })
 }
 
-#[command]
-#[specta]
-pub async fn get_coins(state: State<'_, AppState>) -> Result<Vec<CoinRecord>> {
+pub async fn get_coins(state: State<AppState>) -> Result<Vec<CoinRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -114,12 +110,8 @@ pub async fn get_coins(state: State<'_, AppState>) -> Result<Vec<CoinRecord>> {
     Ok(records)
 }
 
-#[command]
-#[specta]
-pub async fn get_cat_coins(
-    state: State<'_, AppState>,
-    asset_id: String,
-) -> Result<Vec<CoinRecord>> {
+pub async fn get_cat_coins(state: State<AppState>, asset_id: String) -> Result<Vec<CoinRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -159,9 +151,8 @@ pub async fn get_cat_coins(
     Ok(records)
 }
 
-#[command]
-#[specta]
-pub async fn get_cats(state: State<'_, AppState>) -> Result<Vec<CatRecord>> {
+pub async fn get_cats(state: State<AppState>) -> Result<Vec<CatRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
     let cats = wallet.db.cats_by_name().await?;
@@ -185,9 +176,8 @@ pub async fn get_cats(state: State<'_, AppState>) -> Result<Vec<CatRecord>> {
     Ok(records)
 }
 
-#[command]
-#[specta]
-pub async fn get_cat(state: State<'_, AppState>, asset_id: String) -> Result<Option<CatRecord>> {
+pub async fn get_cat(state: State<AppState>, asset_id: String) -> Result<Option<CatRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -212,9 +202,8 @@ pub async fn get_cat(state: State<'_, AppState>, asset_id: String) -> Result<Opt
     .transpose()
 }
 
-#[command]
-#[specta]
-pub async fn get_dids(state: State<'_, AppState>) -> Result<Vec<DidRecord>> {
+pub async fn get_dids(state: State<AppState>) -> Result<Vec<DidRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -243,11 +232,10 @@ pub async fn get_dids(state: State<'_, AppState>) -> Result<Vec<DidRecord>> {
     Ok(records)
 }
 
-#[command]
-#[specta]
 pub async fn get_pending_transactions(
-    state: State<'_, AppState>,
+    state: State<AppState>,
 ) -> Result<Vec<PendingTransactionRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -267,9 +255,8 @@ pub async fn get_pending_transactions(
         .collect()
 }
 
-#[command]
-#[specta]
-pub async fn get_nft_status(state: State<'_, AppState>) -> Result<NftStatus> {
+pub async fn get_nft_status(state: State<AppState>) -> Result<NftStatus> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -286,12 +273,11 @@ pub async fn get_nft_status(state: State<'_, AppState>) -> Result<NftStatus> {
     })
 }
 
-#[command]
-#[specta]
 pub async fn get_nft_collections(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     request: GetNftCollections,
 ) -> Result<Vec<NftCollectionRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -331,12 +317,11 @@ pub async fn get_nft_collections(
     Ok(records)
 }
 
-#[command]
-#[specta]
 pub async fn get_nft_collection(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     collection_id: Option<String>,
 ) -> Result<NftCollectionRecord> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -398,9 +383,8 @@ pub async fn get_nft_collection(
     })
 }
 
-#[command]
-#[specta]
-pub async fn get_nfts(state: State<'_, AppState>, request: GetNfts) -> Result<Vec<NftRecord>> {
+pub async fn get_nfts(state: State<AppState>, request: GetNfts) -> Result<Vec<NftRecord>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -442,14 +426,14 @@ pub async fn get_nfts(state: State<'_, AppState>, request: GetNfts) -> Result<Ve
     Ok(records)
 }
 
-#[command]
-#[specta]
 pub async fn get_collection_nfts(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     request: GetCollectionNfts,
 ) -> Result<Vec<NftRecord>> {
     let state = state.lock().await;
-    let wallet = state.wallet()?;
+    let inner_state = state.lock().await;
+
+    let wallet = inner_state.wallet()?;
 
     let collection_id = if let Some(collection_id) = request.collection_id {
         let (collection_id, prefix) = decode_address(&collection_id)?;
@@ -535,9 +519,8 @@ pub async fn get_collection_nfts(
     Ok(records)
 }
 
-#[command]
-#[specta]
-pub async fn get_nft(state: State<'_, AppState>, launcher_id: String) -> Result<Option<NftInfo>> {
+pub async fn get_nft(state: State<AppState>, launcher_id: String) -> Result<Option<NftInfo>> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 

@@ -1,7 +1,6 @@
 use specta::specta;
-use tauri::{command, State};
 
-use crate::{app_state::AppState, error::Result};
+use crate::{app_state::AppState, error::Result, state::State};
 
 mod actions;
 mod data;
@@ -17,8 +16,8 @@ pub use offers::*;
 pub use settings::*;
 pub use transactions::*;
 
-#[command]
-#[specta]
-pub async fn initialize(state: State<'_, AppState>) -> Result<()> {
-    state.lock().await.initialize().await
+pub async fn initialize(state: State<AppState>) -> Result<()> {
+    let state = state.lock().await;
+    let mut state = state.lock().await;
+    state.initialize().await
 }

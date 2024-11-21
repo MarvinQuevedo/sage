@@ -19,19 +19,17 @@ use sage_database::{CatRow, Database};
 use sage_wallet::{
     compute_nft_info, fetch_uris, insert_transaction, ChildKind, CoinKind, Data, SyncCommand,
     Transaction, Wallet, WalletNftMint,
-};
-use specta::specta;
-use tauri::{command, State};
+}; 
 use tokio::sync::MutexGuard;
 
 use crate::{
     app_state::{AppState, AppStateInner},
     error::{Error, Result},
+    state::State,
 };
 
-#[command]
-#[specta]
-pub async fn validate_address(state: State<'_, AppState>, address: String) -> Result<bool> {
+pub async fn validate_address(state: State<AppState>, address: String) -> Result<bool> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let Some((_puzzle_hash, prefix)) = decode_address(&address).ok() else {
         return Ok(false);
@@ -39,14 +37,13 @@ pub async fn validate_address(state: State<'_, AppState>, address: String) -> Re
     Ok(prefix == state.network().address_prefix)
 }
 
-#[command]
-#[specta]
 pub async fn send(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     address: String,
     amount: Amount,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -74,13 +71,12 @@ pub async fn send(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn combine(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     coin_ids: Vec<String>,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -116,14 +112,13 @@ pub async fn combine(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn split(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     coin_ids: Vec<String>,
     output_count: u32,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -161,13 +156,12 @@ pub async fn split(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn combine_cat(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     coin_ids: Vec<String>,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -198,14 +192,13 @@ pub async fn combine_cat(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn split_cat(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     coin_ids: Vec<String>,
     output_count: u32,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -238,15 +231,14 @@ pub async fn split_cat(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn issue_cat(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     name: String,
     ticker: String,
     amount: Amount,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -282,15 +274,14 @@ pub async fn issue_cat(
     Ok(summary)
 }
 
-#[command]
-#[specta]
 pub async fn send_cat(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     asset_id: String,
     address: String,
     amount: Amount,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -320,13 +311,12 @@ pub async fn send_cat(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn create_did(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     name: String,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -351,12 +341,11 @@ pub async fn create_did(
     summarize(&state, &wallet, coin_spends, confirm_info).await
 }
 
-#[command]
-#[specta]
 pub async fn bulk_mint_nfts(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     request: BulkMintNfts,
 ) -> Result<BulkMintNftsResponse> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -472,14 +461,13 @@ pub async fn bulk_mint_nfts(
     })
 }
 
-#[command]
-#[specta]
 pub async fn transfer_nft(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     nft_id: String,
     address: String,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -509,15 +497,14 @@ pub async fn transfer_nft(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn add_nft_uri(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     nft_id: String,
     uri: String,
     kind: NftUriKind,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -548,14 +535,13 @@ pub async fn add_nft_uri(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn transfer_did(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     did_id: String,
     address: String,
     fee: Amount,
 ) -> Result<TransactionSummary> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -585,12 +571,11 @@ pub async fn transfer_did(
     summarize(&state, &wallet, coin_spends, ConfirmationInfo::default()).await
 }
 
-#[command]
-#[specta]
 pub async fn sign_transaction(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     coin_spends: Vec<CoinSpendJson>,
 ) -> Result<SpendBundleJson> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -614,12 +599,11 @@ pub async fn sign_transaction(
     Ok(json_bundle(&spend_bundle))
 }
 
-#[command]
-#[specta]
 pub async fn submit_transaction(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     spend_bundle: SpendBundleJson,
 ) -> Result<()> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -653,9 +637,9 @@ pub struct ConfirmationInfo {
     pub nft_data: HashMap<Bytes32, Data>,
 }
 
-async fn summarize(
-    state: &MutexGuard<'_, AppStateInner>,
-    wallet: &Wallet,
+async fn summarize<'a>(
+    state: &'a MutexGuard<'_, AppStateInner>,
+    wallet: &'a Wallet,
     coin_spends: Vec<CoinSpend>,
     cache: ConfirmationInfo,
 ) -> Result<TransactionSummary> {

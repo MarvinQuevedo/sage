@@ -1,17 +1,15 @@
 use chia_wallet_sdk::decode_address;
 use sage_api::CatRecord;
 use sage_database::{CatRow, DidRow};
-use specta::specta;
-use tauri::{command, State};
 
 use crate::{
     app_state::AppState,
     error::{Error, Result},
+    state::State,
 };
 
-#[command]
-#[specta]
-pub async fn remove_cat_info(state: State<'_, AppState>, asset_id: String) -> Result<()> {
+pub async fn remove_cat_info(state: State<AppState>, asset_id: String) -> Result<()> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -24,9 +22,8 @@ pub async fn remove_cat_info(state: State<'_, AppState>, asset_id: String) -> Re
     Ok(())
 }
 
-#[command]
-#[specta]
-pub async fn update_cat_info(state: State<'_, AppState>, record: CatRecord) -> Result<()> {
+pub async fn update_cat_info(state: State<AppState>, record: CatRecord) -> Result<()> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -50,14 +47,13 @@ pub async fn update_cat_info(state: State<'_, AppState>, record: CatRecord) -> R
     Ok(())
 }
 
-#[command]
-#[specta]
 pub async fn update_did(
-    state: State<'_, AppState>,
+    state: State<AppState>,
     did_id: String,
     name: Option<String>,
     visible: bool,
 ) -> Result<()> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
@@ -86,9 +82,8 @@ pub async fn update_did(
     Ok(())
 }
 
-#[command]
-#[specta]
-pub async fn update_nft(state: State<'_, AppState>, nft_id: String, visible: bool) -> Result<()> {
+pub async fn update_nft(state: State<AppState>, nft_id: String, visible: bool) -> Result<()> {
+    let state = state.lock().await;
     let state = state.lock().await;
     let wallet = state.wallet()?;
 
