@@ -1,5 +1,0 @@
-pnpm-lock.yaml
-src-tauri/target
-src-tauri/gen
-.sqlx/
-src/bindings.ts
