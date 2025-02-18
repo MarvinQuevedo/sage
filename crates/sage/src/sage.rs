@@ -158,10 +158,11 @@ impl Sage {
     }
 
     fn setup_ssl(&mut self) -> Result<Connector> {
-        let ssl_dir = self.path.join("ssl");
+        let ssl_dir = self.path.join("ssl_client");
         if !ssl_dir.try_exists()? {
             fs::create_dir_all(&ssl_dir)?;
         }
+        println!("ssl_dir: {:?}", ssl_dir);
 
         let cert = load_ssl_cert(
             ssl_dir
