@@ -27,3 +27,7 @@ dist-ssr
 target
 /.env
 /test.sqlite*
+/ssl
+/wallet-client/ssl
+/wallets/*
+/peers/*

@@ -144,7 +144,7 @@ async fn start_rpc(path: PathBuf) -> Result<()> {
 
     tokio::spawn(async move { while let Some(_message) = receiver.recv().await {} });
 
-    let addr: SocketAddr = ([127, 0, 0, 1], app.config.rpc.server_port).into();
+    let addr: SocketAddr = ([0, 0, 0, 0], app.config.rpc.server_port).into();
     info!("RPC server is listening at {addr}");
 
     let app = api_router().with_state(AppState {
@@ -184,7 +184,8 @@ pub async fn call_rpc<T: Serialize, R: Serialize + DeserializeOwned>(
         } else {
             Config::default()
         };
-        ([127, 0, 0, 1], config.rpc.server_port).into()
+        let host = env::var("SAGE_RPC_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string());
+        format!("{}:{}", host, config.rpc.server_port).parse()?
     };
 
     let cert_path = env::var("SAGE_RPC_CERT_PATH").unwrap_or_else(|_| {
