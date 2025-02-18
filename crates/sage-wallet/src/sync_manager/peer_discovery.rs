@@ -51,6 +51,7 @@ impl SyncManager {
             .lookup_all(self.options.timeouts.dns, self.options.dns_batch_size)
             .await;
 
+        println!("DNS discovery addresses: {:?}", addrs.len());
         for addrs in addrs.chunks(self.options.connection_batch_size) {
             if self.connect_batch(addrs, false).await {
                 break;
@@ -153,6 +154,7 @@ impl SyncManager {
             let duration = self.options.timeouts.connection;
 
             futures.push(async move {
+                println!("Connecting to peer: {}", socket_addr);
                 let result = timeout(
                     duration,
                     connect_peer(network_id, connector, socket_addr, PeerOptions::default()),
@@ -170,6 +172,7 @@ impl SyncManager {
                             return true;
                         }
                     } else if !force {
+                        println!("Banning peer {} because could not add peer", socket_addr);
                         self.state.lock().await.ban(
                             socket_addr.ip(),
                             Duration::from_secs(60 * 10),
@@ -178,7 +181,7 @@ impl SyncManager {
                     }
                 }
                 Ok(Err(error)) => {
-                    debug!("Failed to connect to peer {socket_addr}: {error}");
+                    println!("Failed to connect to peer {socket_addr}: {error}");
                     if !force {
                         self.state.lock().await.ban(
                             socket_addr.ip(),
@@ -188,7 +191,7 @@ impl SyncManager {
                     }
                 }
                 Err(_timeout) => {
-                    debug!("Connection to peer {socket_addr} timed out");
+                    println!("Connection to peer {socket_addr} timed out");
                     if !force {
                         self.state.lock().await.ban(
                             socket_addr.ip(),

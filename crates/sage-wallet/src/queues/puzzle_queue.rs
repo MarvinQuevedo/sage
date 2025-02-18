@@ -133,6 +133,7 @@ impl PuzzleQueue {
                             | WalletError::PeerMisbehaved
                             | WalletError::Client(..)
                     ) {
+                        warn!("Banning peer {} because of puzzle lookup error", addr);
                         self.state.lock().await.ban(
                             addr.ip(),
                             Duration::from_secs(300),
