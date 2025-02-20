@@ -46,17 +46,71 @@ impl SyncManager {
     }
 
     pub(super) async fn dns_discovery(&mut self) {
-        let addrs = self
+        // Try the primary DNS lookup method first
+        let mut addrs = self
             .network
             .lookup_all(self.options.timeouts.dns, self.options.dns_batch_size)
             .await;
 
-        println!("DNS discovery addresses: {:?}", addrs.len());
+        // If primary method returns no addresses, try the command-line fallback
+        if addrs.len() < 5 {
+            debug!("Primary DNS lookup returned no addresses, trying nslookup command");
+            addrs = self.dns_lookup_command().await;
+        }
+
+        debug!("DNS discovery found {} addresses", addrs.len());
         for addrs in addrs.chunks(self.options.connection_batch_size) {
             if self.connect_batch(addrs, false).await {
                 break;
             }
         }
+    }
+
+    async fn dns_lookup_command(&self) -> Vec<SocketAddr> {
+        let mut addrs = Vec::new();
+
+        for dns_introducer in &self.network.dns_introducers {
+            match tokio::process::Command::new("nslookup")
+                .arg("-type=A")
+                .arg(dns_introducer)
+                .arg("8.8.8.8")
+                .output()
+                .await
+            {
+                Ok(output) => {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    
+                    // Parse the nslookup output to extract IP addresses
+                    let ips: Vec<SocketAddr> = output_str
+                        .lines()
+                        .filter_map(|line| {
+                            if line.contains("Address:") {
+                                line.split_whitespace()
+                                    .last()
+                                    .and_then(|ip| ip.parse::<IpAddr>().ok())
+                                    .map(|ip| SocketAddr::new(ip, self.network.default_port))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    if !ips.is_empty() {
+                        debug!(
+                            "nslookup for {} returned {} IPv4 addresses",
+                            dns_introducer,
+                            ips.len()
+                        );
+                        addrs.extend(ips);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to execute nslookup for {}: {}", dns_introducer, e);
+                }
+            }
+        }
+
+        addrs
     }
 
     pub(super) async fn peer_discovery(&mut self) -> bool {
