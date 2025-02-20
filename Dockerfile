@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y \
     iproute2
 
 # Install Node.js and npm first
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &&
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs
 
 # Install pnpm using npm
@@ -52,9 +52,6 @@ RUN mkdir -p /root/.local/share/com.rigidnetwork.sage/ssl/
 COPY ./ssl/wallet.crt /root/.local/share/com.rigidnetwork.sage/ssl/
 COPY ./ssl/wallet.key /root/.local/share/com.rigidnetwork.sage/ssl/
 
-# Ensure proper permissions for SSL files
-RUN chmod 600 /root/.local/share/com.rigidnetwork.sage/ssl/wallet.key &&
-    chmod 644 /root/.local/share/com.rigidnetwork.sage/ssl/wallet.crt
 
 RUN cargo build --release -p sage-cli
 
