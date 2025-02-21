@@ -76,7 +76,7 @@ tauri-specta = "2.0.0-rc.20"
 # Chia
 chia = "0.17.0"
 clvmr = "0.10.0"
-chia-wallet-sdk = { features = ["rustls", "offers"], version = "0.20.0" }
+chia-wallet-sdk = { git = "https://github.com/MarvinQuevedo/chia-wallet-sdk", branch = "add_memos_to_nft_transfers", features = ["rustls", "offers"] }
 bip39 = "2.0.0"
 bech32 = "0.9.1"
 

@@ -114,7 +114,8 @@ impl Wallet {
                     Cat::spend_all(&mut ctx, &[cat_spend])?;
                 }
                 SingleSidedIntermediary::Nft(nft) => {
-                    let _nft = nft.transfer(&mut ctx, &p2, p2_puzzle_hash, extra_conditions)?;
+                    let _nft =
+                        nft.transfer(&mut ctx, &p2, p2_puzzle_hash, extra_conditions, None)?;
                 }
             }
         } else {

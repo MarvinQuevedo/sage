@@ -163,6 +163,8 @@ pub struct TransferNfts {
     pub fee: Amount,
     #[serde(default)]
     pub auto_submit: bool,
+    #[serde(default)]
+    pub memos: Option<Vec<Vec<String>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

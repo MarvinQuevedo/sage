@@ -314,9 +314,25 @@ impl Sage {
             .collect::<Result<Vec<_>>>()?;
         let puzzle_hash = self.parse_address(req.address)?;
         let fee = self.parse_amount(req.fee)?;
+        let memos_bytes: Option<Vec<Vec<Bytes>>> = req
+            .memos
+            .map(|memos| {
+                memos
+                    .into_iter()
+                    .map(|memo| {
+                        memo.into_iter()
+                            .map(|hex_str| {
+                                let bytes_vec = hex::decode(hex_str)?;
+                                Ok(Bytes::from(bytes_vec))
+                            })
+                            .collect::<Result<Vec<_>>>()
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .transpose()?;
 
         let coin_spends = wallet
-            .transfer_nfts(nft_ids, puzzle_hash, fee, false, true)
+            .transfer_nfts(nft_ids, puzzle_hash, fee, false, true, memos_bytes)
             .await?;
         self.transact(coin_spends, req.auto_submit).await
     }

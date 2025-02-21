@@ -1,5 +1,5 @@
 use chia::{
-    protocol::{Bytes32, CoinSpend, Program},
+    protocol::{Bytes, Bytes32, CoinSpend, Program},
     puzzles::nft::{NftMetadata, NFT_METADATA_UPDATER_PUZZLE_HASH},
 };
 use chia_wallet_sdk::{
@@ -97,6 +97,7 @@ impl Wallet {
         fee: u64,
         hardened: bool,
         reuse: bool,
+        memos: Option<Vec<Vec<Bytes>>>,
     ) -> Result<Vec<CoinSpend>, WalletError> {
         if nft_ids.is_empty() {
             return Err(WalletError::EmptyBulkTransfer);
@@ -133,7 +134,7 @@ impl Wallet {
             .iter()
             .map(|nft| nft.coin.coin_id())
             .collect::<Vec<_>>();
-
+        let mut index = 0;
         for (i, nft) in nfts.into_iter().enumerate() {
             let nft_metadata_ptr = ctx.alloc(&nft.info.metadata)?;
             let nft = nft.with_metadata(HashedPtr::from_ptr(&ctx.allocator, nft_metadata_ptr));
@@ -157,7 +158,14 @@ impl Wallet {
                 conditions = conditions.transfer_nft(None, Vec::new(), None);
             }
 
-            let _nft = nft.transfer(&mut ctx, &p2, puzzle_hash, conditions)?;
+            let memos = if let Some(memos) = &memos {
+                Some(memos[index].iter().map(|b| b.clone()).collect::<Vec<Bytes>>())
+            } else {
+                None
+            };
+
+            let _nft = nft.transfer(&mut ctx, &p2, puzzle_hash, conditions, memos)?;
+            index += 1;
         }
 
         if fee > 0 {
@@ -289,7 +297,14 @@ mod tests {
         for _ in 0..2 {
             let coin_spends = test
                 .wallet
-                .transfer_nfts(vec![nft.info.launcher_id], puzzle_hash, 0, false, true)
+                .transfer_nfts(
+                    vec![nft.info.launcher_id],
+                    puzzle_hash,
+                    0,
+                    false,
+                    true,
+                    None,
+                )
                 .await?;
             test.transact(coin_spends).await?;
             test.wait_for_coins().await;
@@ -338,7 +353,14 @@ mod tests {
 
         let coin_spends = test
             .wallet
-            .transfer_nfts(vec![nft.info.launcher_id], puzzle_hash, 0, false, true)
+            .transfer_nfts(
+                vec![nft.info.launcher_id],
+                puzzle_hash,
+                0,
+                false,
+                true,
+                None,
+            )
             .await?;
         test.transact(coin_spends).await?;
         test.wait_for_coins().await;
@@ -391,7 +413,14 @@ mod tests {
 
         let coin_spends = alice
             .wallet
-            .transfer_nfts(vec![nft.info.launcher_id], puzzle_hash, 0, false, true)
+            .transfer_nfts(
+                vec![nft.info.launcher_id],
+                puzzle_hash,
+                0,
+                false,
+                true,
+                None,
+            )
             .await?;
         alice.transact(coin_spends).await?;
         bob.wait_for_puzzles().await;
@@ -419,7 +448,14 @@ mod tests {
 
         let coin_spends = bob
             .wallet
-            .transfer_nfts(vec![nft.info.launcher_id], puzzle_hash, 0, false, true)
+            .transfer_nfts(
+                vec![nft.info.launcher_id],
+                puzzle_hash,
+                0,
+                false,
+                true,
+                None,
+            )
             .await?;
         bob.transact(coin_spends).await?;
         bob.wait_for_coins().await;

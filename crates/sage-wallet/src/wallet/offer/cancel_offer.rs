@@ -123,7 +123,7 @@ impl Wallet {
                 let synthetic_key = self.db.synthetic_key(nft.info.p2_puzzle_hash).await?;
                 let p2 = StandardLayer::new(synthetic_key);
 
-                let _nft = nft.transfer(&mut ctx, &p2, p2_puzzle_hash, Conditions::new())?;
+                let _nft = nft.transfer(&mut ctx, &p2, p2_puzzle_hash, Conditions::new(), None)?;
             }
             CoinKind::Unknown => unreachable!(),
         }
