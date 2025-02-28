@@ -31,3 +31,5 @@ target
 /wallet-client/ssl
 /wallets/*
 /peers/*
+build_and_push.ps1
+run.ps1
