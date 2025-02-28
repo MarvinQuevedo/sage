@@ -28,8 +28,7 @@ futures-util = { workspace = true }
 futures-lite = { workspace = true }
 reqwest = { workspace = true, default-features = false, features = ["http2", "rustls-tls-webpki-roots", "json"] }
 serde = { workspace = true, features = ["derive"] }
-indexmap = { workspace = true }
-trust-dns-resolver = { workspace = true } 
+indexmap = { workspace = true } 
 
 [dev-dependencies]
 anyhow = { workspace = true }

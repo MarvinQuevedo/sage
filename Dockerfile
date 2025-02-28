@@ -1,4 +1,4 @@
-# dockerfile amd46
+# dockerfile amd64
 
 FROM rust:latest
 
@@ -18,13 +18,18 @@ RUN apt-get update && apt-get install -y \
     clang \
     cmake \
     libclang1 \
-    golang \
     dnsutils \
     ca-certificates \
     openssl \
     net-tools \
     iputils-ping \
     iproute2
+
+# Install specific golang version 1.19.8
+RUN wget https://golang.org/dl/go1.19.8.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.19.8.linux-amd64.tar.gz && \
+    rm go1.19.8.linux-amd64.tar.gz
+ENV PATH=$PATH:/usr/local/go/bin
 
 # Install Node.js and npm first
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
@@ -55,6 +60,18 @@ COPY ./ssl/wallet.key /root/.local/share/com.rigidnetwork.sage/ssl/
 
 RUN cargo build --release -p sage-cli
 
+# Create a non-root user and group
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Create SSL directory for the non-root user
+RUN mkdir -p /home/appuser/.local/share/com.rigidnetwork.sage/ssl/
+COPY ./ssl/wallet.crt /home/appuser/.local/share/com.rigidnetwork.sage/ssl/
+COPY ./ssl/wallet.key /home/appuser/.local/share/com.rigidnetwork.sage/ssl/
+
+# Set proper ownership
+RUN chown -R appuser:appuser /app
+RUN chown -R appuser:appuser /home/appuser
+
 ENV RUST_LOG=debug
 
 # Expose both IPv4 and IPv6 ports
@@ -65,6 +82,12 @@ EXPOSE 9257/tcp
 
 # Configure system for better TLS handling
 RUN update-ca-certificates
+
+# Apply security updates to address CVE-2025-27091
+RUN apt-get update && apt-get upgrade -y
+
+# Switch to non-root user
+USER appuser
 
 CMD ["cargo", "run", "-p", "sage-cli", "--release", "--", "rpc", "start"]
 #CMD ["/app/target/release/sage-cli", "rpc", "start"]
