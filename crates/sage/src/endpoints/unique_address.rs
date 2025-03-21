@@ -1,8 +1,8 @@
 use chia::protocol::Bytes32;
-use sage_api::{GetCatBalanceByPuzzleHashResponse, GetXchBalanceByPuzzleHashResponse};
+use sage_api::{GetCatBalanceByPuzzleHash, GetCatBalanceByPuzzleHashResponse, GetXchBalanceByPuzzleHash, GetXchBalanceByPuzzleHashResponse};
 use sage_wallet::Wallet;
 
-use crate::{fetch_filtered_cats, fetch_filtered_coins};
+use crate::{fetch_filtered_cats, fetch_filtered_coins, parse_asset_id, parse_hash, Sage};
 use crate::Error;
 
 impl Sage {
@@ -13,7 +13,7 @@ impl Sage {
         let wallet = self.wallet()?;
         let puzzle_hash = parse_hash(req.puzzle_hash)?;
         
-        let coins = fetch_filtered_coins(wallet, None, Some(puzzle_hash))
+        let coins = fetch_filtered_coins(&wallet, None, Some(puzzle_hash))
             .await?;
         let balance = coins.iter().map(|coin| coin.amount).sum();
         
@@ -28,7 +28,7 @@ impl Sage {
         let puzzle_hash = parse_hash(req.puzzle_hash)?;
         let asset_id = parse_asset_id(req.asset_id)?;
         
-        let cats = fetch_filtered_cats(wallet, None, asset_id, Some(puzzle_hash))
+        let cats = fetch_filtered_cats(&wallet, None, asset_id, Some(puzzle_hash))
             .await?;
         let balance = cats.iter().map(|cat| cat.coin.amount).sum();
         
