@@ -76,3 +76,28 @@ pub struct IncreaseDerivationIndex {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(feature = "tauri", derive(specta::Type))]
 pub struct IncreaseDerivationIndexResponse {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+pub struct GetXchBalanceByPuzzleHash {
+    pub puzzle_hash: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+pub struct GetXchBalanceByPuzzleHashResponse {
+    pub balance: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+pub struct GetCatBalanceByPuzzleHash {
+    pub puzzle_hash: String,
+    pub asset_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+pub struct GetCatBalanceByPuzzleHashResponse {
+    pub balance: u64,
+}

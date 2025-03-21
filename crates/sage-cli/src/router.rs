@@ -136,6 +136,9 @@ routes!(
     update_nft_collection await: UpdateNftCollection = "/update_nft_collection",
     redownload_nft await: RedownloadNft = "/redownload_nft",
     increase_derivation_index await: IncreaseDerivationIndex = "/increase_derivation_index",
+    get_xch_balance_by_puzzle_hash await: GetXchBalanceByPuzzleHash = "/get_xch_balance_by_puzzle_hash",
+    get_cat_balance_by_puzzle_hash await: GetCatBalanceByPuzzleHash = "/get_cat_balance_by_puzzle_hash",
+
 );
 
 async fn start_rpc(path: PathBuf) -> Result<()> {
