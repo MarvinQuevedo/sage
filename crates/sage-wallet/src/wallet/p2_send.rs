@@ -14,11 +14,27 @@ impl Wallet {
         memos: Vec<Bytes>,
         hardened: bool,
         reuse: bool,
+        selected_coins: Option<Vec<Coin>>,
     ) -> Result<Vec<CoinSpend>, WalletError> {
+        let total_amount = amounts
+            .iter()
+            .map(|(_, amount)| *amount as u128)
+            .sum::<u128>()
+            + fee as u128;
         let combined_amount = amounts.iter().map(|(_, amount)| amount).sum::<u64>();
 
         let total = combined_amount as u128 + fee as u128;
-        let coins = self.select_p2_coins(total).await?;
+
+        let coins = if let Some(pre_selected) = selected_coins {
+            // Validate pre-selected coins have sufficient amount
+            let available: u128 = pre_selected.iter().map(|coin| coin.amount as u128).sum();
+            if available < total_amount {
+                return Err(WalletError::InsufficientFunds);
+            }
+            pre_selected
+        } else {
+            self.select_p2_coins(total_amount).await?
+        };
         let selected: u128 = coins.iter().map(|coin| coin.amount as u128).sum();
 
         let change_puzzle_hash = self.p2_puzzle_hash(hardened, reuse).await?;
@@ -62,7 +78,14 @@ mod tests {
 
         let coin_spends = test
             .wallet
-            .send_xch(vec![(test.puzzle_hash, 1000)], 0, Vec::new(), false, true)
+            .send_xch(
+                vec![(test.puzzle_hash, 1000)],
+                0,
+                Vec::new(),
+                false,
+                true,
+                None,
+            )
             .await?;
 
         assert_eq!(coin_spends.len(), 1);
@@ -82,7 +105,14 @@ mod tests {
 
         let coin_spends = test
             .wallet
-            .send_xch(vec![(test.puzzle_hash, 250)], 250, Vec::new(), false, true)
+            .send_xch(
+                vec![(test.puzzle_hash, 250)],
+                250,
+                Vec::new(),
+                false,
+                true,
+                None,
+            )
             .await?;
 
         assert_eq!(coin_spends.len(), 1);
@@ -108,6 +138,7 @@ mod tests {
                 Vec::new(),
                 true,
                 true,
+                None,
             )
             .await?;
 
@@ -121,7 +152,14 @@ mod tests {
 
         let coin_spends = test
             .wallet
-            .send_xch(vec![(test.puzzle_hash, 1000)], 0, Vec::new(), false, true)
+            .send_xch(
+                vec![(test.puzzle_hash, 1000)],
+                0,
+                Vec::new(),
+                false,
+                true,
+                None,
+            )
             .await?;
 
         assert_eq!(coin_spends.len(), 1);

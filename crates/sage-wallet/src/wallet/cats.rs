@@ -8,7 +8,7 @@ use chia_wallet_sdk::{Cat, Conditions, SpendContext};
 
 use crate::WalletError;
 
-use super::Wallet;
+use super::{p2_coin_management::fetch_first_20_coins, Wallet};
 
 impl Wallet {
     pub async fn issue_cat(
@@ -65,18 +65,37 @@ impl Wallet {
         memos: Vec<Bytes>,
         hardened: bool,
         reuse: bool,
+        selected_cats: Option<Vec<CatCoin>>,
     ) -> Result<Vec<CoinSpend>, WalletError> {
         let fee_coins = if fee > 0 {
-            self.select_p2_coins(fee as u128).await?
+            let coins = fetch_first_20_coins(self).await?;
+            let required_fee_coins = vec![];
+            let mut total_amount = 0;
+            for coin in coins {
+                if total_amount >= fee as u128 {
+                    break;
+                }
+                required_fee_coins.push(coin);
+            }
+            required_fee_coins
         } else {
             Vec::new()
         };
 
         let combined_amount = amounts.iter().map(|(_, amount)| amount).sum::<u64>();
 
-        let cats = self
-            .select_cat_coins(asset_id, combined_amount as u128)
-            .await?;
+        let cats = if let Some(pre_selected) = selected_cats {
+            // Validate pre-selected cats have sufficient amount
+            let available: u128 = pre_selected.iter().map(|cat| cat.coin.amount as u128).sum();
+            if available < combined_amount as u128 {
+                return Err(WalletError::InsufficientFunds);
+            }
+            pre_selected
+        } else {
+            self.select_cat_coins(asset_id, combined_amount as u128)
+                .await?
+        };
+
         let cat_selected: u128 = cats.iter().map(|cat| cat.coin.amount as u128).sum();
         let cat_change: u64 = (cat_selected - combined_amount as u128)
             .try_into()
@@ -172,6 +191,7 @@ mod tests {
                 Vec::new(),
                 false,
                 true,
+                None,
             )
             .await?;
         assert_eq!(coin_spends.len(), 1);
@@ -191,6 +211,7 @@ mod tests {
                 Vec::new(),
                 false,
                 true,
+                None,
             )
             .await?;
         assert_eq!(coin_spends.len(), 3);

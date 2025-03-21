@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use chia::protocol::{Bytes32, Coin, CoinSpend};
 use chia_wallet_sdk::{select_coins, Conditions, SpendContext};
 
-use crate::WalletError;
+use crate::{fetch_coins, WalletError};
 
 use super::Wallet;
 
@@ -212,5 +212,75 @@ mod tests {
         assert_eq!(test.wallet.db.spendable_coins().await?.len(), 1);
 
         Ok(())
+    }
+}
+
+pub async fn get_first_20_puzze_hashes(wallet: &Wallet) -> Result<Vec<Bytes32>, WalletError> {
+    let derivations = wallet
+        .db
+        .derivations(false, 20, 0)
+        .await?
+        .into_iter()
+        .map(|row| Ok(row.p2_puzzle_hash))
+        .collect::<Result<Vec<Bytes32>>>()?;
+
+    Ok(GetDerivationsResponse { derivations })
+}
+
+pub async fn fetch_first_20_coins(wallet: &Wallet) -> Result<Vec<Coin>, WalletError> {
+    let derivations: Vec<Bytes32> = get_first_20_puzze_hashes(wallet).await?;
+    let coins = fetch_filtered_coins(wallet, None, None).await;
+    if let Ok(coins) = coins {
+        let coins = coins
+            .into_iter()
+            .filter(|coin| derivations.contains(&coin.puzzle_hash))
+            .collect();
+        Ok(coins)
+    } else {
+        Err(WalletError::CoinSelectionError)
+    }
+}
+
+pub async fn fetch_filtered_coins(
+    wallet: &Wallet,
+    selected_coins: Option<Vec<String>>,
+    p2_puzzle_hash: Option<Bytes32>,
+) -> Result<Vec<Coin>> {
+    if let Some(coin_ids) = selected_coins {
+        // If specific coins are selected, fetch and validate them
+        let coins = fetch_coins(wallet, coin_ids).await;
+        if let Ok(coins) = coins {
+            // Apply puzzle hash filter if specified
+            if let Some(puzzle_hash) = p2_puzzle_hash {
+                Ok(coins
+                    .into_iter()
+                    .filter(|coin| coin.puzzle_hash == puzzle_hash)
+                    .collect())
+            } else {
+                Ok(coins)
+            }
+        } else {
+            Err(WalletError::CoinSelectionError)
+        }
+    } else {
+        // Use existing coin fetching logic if no specific coins selected
+        let mut coins = Vec::new();
+        let rows = wallet.db.p2_coin_states().await?;
+
+        for row in rows {
+            if row.coin_state.spent_height.is_some() {
+                continue;
+            }
+
+            if let Some(puzzle_hash) = p2_puzzle_hash {
+                if row.coin_state.coin.puzzle_hash != puzzle_hash {
+                    continue;
+                }
+            }
+
+            coins.push(row.coin_state.coin);
+        }
+
+        Ok(coins)
     }
 }

@@ -18,26 +18,42 @@ use sage_wallet::WalletNftMint;
 use tokio::time::timeout;
 
 use crate::{
-    fetch_cats, fetch_coins, json_bundle, json_spend, parse_asset_id, parse_cat_amount,
-    parse_did_id, parse_hash, parse_nft_id, rust_bundle, rust_spend, ConfirmationInfo, Result,
-    Sage,
+    fetch_cats, fetch_coins, fetch_filtered_cats, fetch_filtered_coins, json_bundle, json_spend,
+    parse_asset_id, parse_cat_amount, parse_did_id, parse_hash, parse_nft_id, rust_bundle,
+    rust_spend, ConfirmationInfo, Result, Sage,
 };
-
 impl Sage {
     pub async fn send_xch(&self, req: SendXch) -> Result<TransactionResponse> {
         let wallet = self.wallet()?;
-        let puzzle_hash = self.parse_address(req.address)?;
         let amount = self.parse_amount(req.amount)?;
         let fee = self.parse_amount(req.fee)?;
 
-        let mut memos = Vec::new();
+        let p2_puzzle_hash = self.parse_address(req.address)?;
+        let filter_puzzle_hash = req
+            .filter_puzzle_hash
+            .map(|ph| self.parse_address(ph))
+            .transpose()?;
 
+        let selected_coins = if req.selected_coins.is_some() || req.filter_puzzle_hash.is_some() {
+            Some(fetch_filtered_coins(&wallet, req.selected_coins, filter_puzzle_hash).await?)
+        } else {
+            None
+        };
+
+        let mut memos = Vec::new();
         for memo in req.memos {
             memos.push(Bytes::from(hex::decode(memo)?));
         }
 
         let coin_spends = wallet
-            .send_xch(vec![(puzzle_hash, amount)], fee, memos, false, true)
+            .send_xch(
+                vec![(p2_puzzle_hash, amount)],
+                fee,
+                memos,
+                false,
+                true,
+                selected_coins,
+            )
             .await?;
         self.transact(coin_spends, req.auto_submit).await
     }
@@ -61,7 +77,9 @@ impl Sage {
             memos.push(Bytes::from(hex::decode(memo)?));
         }
 
-        let coin_spends = wallet.send_xch(amounts, fee, memos, false, true).await?;
+        let coin_spends = wallet
+            .send_xch(amounts, fee, memos, false, true, None)
+            .await?;
         self.transact(coin_spends, req.auto_submit).await
     }
 
@@ -129,13 +147,39 @@ impl Sage {
 
     pub async fn send_cat(&self, req: SendCat) -> Result<TransactionResponse> {
         let wallet = self.wallet()?;
-        let asset_id = parse_asset_id(req.asset_id)?;
-        let puzzle_hash = self.parse_address(req.address)?;
-        let amount = parse_cat_amount(req.amount)?;
+        let amount = self.parse_amount(req.amount)?;
         let fee = self.parse_amount(req.fee)?;
 
-        let mut memos = Vec::new();
+        let asset_id = parse_asset_id(req.asset_id)?;
+        let p2_puzzle_hash = self.parse_address(req.address)?;
+        let filter_puzzle_hash = req
+            .filter_puzzle_hash
+            .map(|ph| self.parse_address(ph))
+            .transpose()?;
 
+        let selected_cats = if req.selected_coins.is_some() || req.filter_puzzle_hash.is_some() {
+            Some(
+                fetch_filtered_cats(&wallet, req.selected_coins, asset_id, filter_puzzle_hash)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        if selected_cats.is_some() {
+            // use only the required coins to amount
+            let mut total_amount = 0;
+            let mut required_coins = Vec::new();
+            for cat in selected_cats.unwrap() {
+                total_amount += cat.coin.amount;
+                required_coins.push(cat.coin);
+            }
+            if total_amount < amount {
+                return Err(Error::InsufficientFunds);
+            }
+
+            selected_cats = Some(required_coins);
+        }
+        let mut memos = Vec::new();
         for memo in req.memos {
             memos.push(Bytes::from(hex::decode(memo)?));
         }
@@ -143,11 +187,12 @@ impl Sage {
         let coin_spends = wallet
             .send_cat(
                 asset_id,
-                vec![(puzzle_hash, amount)],
+                vec![(p2_puzzle_hash, amount)],
                 fee,
                 memos,
                 false,
                 true,
+                selected_cats,
             )
             .await?;
         self.transact(coin_spends, req.auto_submit).await
@@ -174,7 +219,7 @@ impl Sage {
         }
 
         let coin_spends = wallet
-            .send_cat(asset_id, amounts, fee, memos, false, true)
+            .send_cat(asset_id, amounts, fee, memos, false, true, None)
             .await?;
         self.transact(coin_spends, req.auto_submit).await
     }
