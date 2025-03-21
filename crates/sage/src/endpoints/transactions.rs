@@ -20,7 +20,7 @@ use tokio::time::timeout;
 use crate::{
     fetch_cats, fetch_coins, fetch_filtered_cats, fetch_filtered_coins, json_bundle, json_spend,
     parse_asset_id, parse_cat_amount, parse_did_id, parse_hash, parse_nft_id, rust_bundle,
-    rust_spend, ConfirmationInfo, Result, Sage,
+    rust_spend, ConfirmationInfo, Result, Sage, Error,
 };
 impl Sage {
     pub async fn send_xch(&self, req: SendXch) -> Result<TransactionResponse> {
@@ -31,7 +31,8 @@ impl Sage {
         let p2_puzzle_hash = self.parse_address(req.address)?;
         let filter_puzzle_hash = req
             .filter_puzzle_hash
-            .map(|ph| self.parse_address(ph))
+            .as_ref()
+            .map(|ph| self.parse_address(ph.clone()))
             .transpose()?;
 
         let selected_coins = if req.selected_coins.is_some() || req.filter_puzzle_hash.is_some() {
@@ -154,10 +155,11 @@ impl Sage {
         let p2_puzzle_hash = self.parse_address(req.address)?;
         let filter_puzzle_hash = req
             .filter_puzzle_hash
-            .map(|ph| self.parse_address(ph))
+            .as_ref()
+            .map(|ph| self.parse_address(ph.clone()))
             .transpose()?;
 
-        let selected_cats = if req.selected_coins.is_some() || req.filter_puzzle_hash.is_some() {
+        let mut selected_cats = if req.selected_coins.is_some() || req.filter_puzzle_hash.is_some() {
             Some(
                 fetch_filtered_cats(&wallet, req.selected_coins, asset_id, filter_puzzle_hash)
                     .await?,
@@ -165,19 +167,22 @@ impl Sage {
         } else {
             None
         };
-        if selected_cats.is_some() {
+        if let Some(cats) = selected_cats.take() {
             // use only the required coins to amount
             let mut total_amount = 0;
-            let mut required_coins = Vec::new();
-            for cat in selected_cats.unwrap() {
+            let mut required_cats = Vec::new();
+            for cat in cats {
                 total_amount += cat.coin.amount;
-                required_coins.push(cat.coin);
+                required_cats.push(cat);
+                if total_amount >= amount {
+                    break;  // Stop once we have enough
+                }
             }
             if total_amount < amount {
                 return Err(Error::InsufficientFunds);
             }
 
-            selected_cats = Some(required_coins);
+            selected_cats = Some(required_cats);
         }
         let mut memos = Vec::new();
         for memo in req.memos {

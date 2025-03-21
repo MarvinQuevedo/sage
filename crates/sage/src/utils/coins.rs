@@ -1,8 +1,6 @@
 use chia::protocol::{Bytes32, Coin};
 use chia_wallet_sdk::Cat;
-use hex_literal::hex;
-use sage_api::DerivationRecord;
-use sage_config::Network;
+use hex_literal::hex;  
 use sage_wallet::Wallet;
 
 use crate::{Error, Result};

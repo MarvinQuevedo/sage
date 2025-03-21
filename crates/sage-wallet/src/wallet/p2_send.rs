@@ -1,4 +1,4 @@
-use chia::protocol::{Bytes, Bytes32, CoinSpend};
+use chia::protocol::{Bytes, Bytes32, Coin, CoinSpend};
 use chia_wallet_sdk::{Conditions, Memos, SpendContext};
 
 use crate::WalletError;

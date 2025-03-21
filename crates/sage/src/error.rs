@@ -207,6 +207,11 @@ pub enum Error {
 
     #[error("Timeout")]
     Timeout(#[from] Elapsed),
+ 
+    #[error("Insufficient funds")]
+    InsufficientFunds,
+  
+    
 }
 
 impl Error {
@@ -214,6 +219,7 @@ impl Error {
         match self {
             Self::Wallet(..) => ErrorKind::Wallet,
             Self::NotLoggedIn | Self::NoSigningKey => ErrorKind::Unauthorized,
+            Self::InsufficientFunds => ErrorKind::Api,
             Self::Keychain(error) => match error {
                 KeychainError::Decrypt => ErrorKind::Unauthorized,
                 KeychainError::KeyExists

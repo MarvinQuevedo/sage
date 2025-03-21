@@ -65,16 +65,17 @@ impl Wallet {
         memos: Vec<Bytes>,
         hardened: bool,
         reuse: bool,
-        selected_cats: Option<Vec<CatCoin>>,
+        selected_cats: Option<Vec<Cat>>,
     ) -> Result<Vec<CoinSpend>, WalletError> {
         let fee_coins = if fee > 0 {
             let coins = fetch_first_20_coins(self).await?;
-            let required_fee_coins = vec![];
             let mut total_amount = 0;
+            let mut required_fee_coins = vec![];
             for coin in coins {
                 if total_amount >= fee as u128 {
                     break;
                 }
+                total_amount += coin.amount as u128;
                 required_fee_coins.push(coin);
             }
             required_fee_coins

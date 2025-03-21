@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use chia::protocol::{Bytes32, Coin, CoinSpend};
-use chia_wallet_sdk::{select_coins, Conditions, SpendContext};
+use chia_wallet_sdk::{select_coins, CoinSelectionError, Conditions, SpendContext};
 
 use crate::{fetch_coins, WalletError};
 
@@ -222,9 +222,9 @@ pub async fn get_first_20_puzze_hashes(wallet: &Wallet) -> Result<Vec<Bytes32>, 
         .await?
         .into_iter()
         .map(|row| Ok(row.p2_puzzle_hash))
-        .collect::<Result<Vec<Bytes32>>>()?;
+        .collect::<Result<Vec<Bytes32>, WalletError>>()?;
 
-    Ok(GetDerivationsResponse { derivations })
+    Ok(derivations)
 }
 
 pub async fn fetch_first_20_coins(wallet: &Wallet) -> Result<Vec<Coin>, WalletError> {
@@ -237,7 +237,7 @@ pub async fn fetch_first_20_coins(wallet: &Wallet) -> Result<Vec<Coin>, WalletEr
             .collect();
         Ok(coins)
     } else {
-        Err(WalletError::CoinSelectionError)
+        Err(WalletError::CoinSelection(CoinSelectionError::NoSpendableCoins))
     }
 }
 
@@ -245,7 +245,7 @@ pub async fn fetch_filtered_coins(
     wallet: &Wallet,
     selected_coins: Option<Vec<String>>,
     p2_puzzle_hash: Option<Bytes32>,
-) -> Result<Vec<Coin>> {
+) -> Result<Vec<Coin>, WalletError> {
     if let Some(coin_ids) = selected_coins {
         // If specific coins are selected, fetch and validate them
         let coins = fetch_coins(wallet, coin_ids).await;
@@ -260,7 +260,7 @@ pub async fn fetch_filtered_coins(
                 Ok(coins)
             }
         } else {
-            Err(WalletError::CoinSelectionError)
+            Err(WalletError::CoinSelection(CoinSelectionError::NoSpendableCoins))
         }
     } else {
         // Use existing coin fetching logic if no specific coins selected
