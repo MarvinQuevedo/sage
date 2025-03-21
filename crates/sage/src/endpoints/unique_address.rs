@@ -3,26 +3,35 @@ use sage_api::{GetCatBalanceByPuzzleHashResponse, GetXchBalanceByPuzzleHashRespo
 use sage_wallet::Wallet;
 
 use crate::{fetch_filtered_cats, fetch_filtered_coins};
+use crate::Error;
 
-pub async fn get_xch_balance_by_puzzle_hash(
-    wallet: &Wallet,
-    puzzle_hash: Bytes32,
-) -> GetXchBalanceByPuzzleHashResponse {
-    let coins = fetch_filtered_coins(wallet, None, Some(puzzle_hash))
-        .await
-        .unwrap();
-    let balance = coins.iter().map(|coin| coin.amount).sum();
-    GetXchBalanceByPuzzleHashResponse { balance }
-}
+impl Sage {
+    pub async fn get_xch_balance_by_puzzle_hash(
+        &self,
+        req: GetXchBalanceByPuzzleHash,
+    ) -> Result<GetXchBalanceByPuzzleHashResponse, Error> {
+        let wallet = self.wallet()?;
+        let puzzle_hash = parse_hash(req.puzzle_hash)?;
+        
+        let coins = fetch_filtered_coins(wallet, None, Some(puzzle_hash))
+            .await?;
+        let balance = coins.iter().map(|coin| coin.amount).sum();
+        
+        Ok(GetXchBalanceByPuzzleHashResponse { balance })
+    }
 
-pub async fn get_cat_balance_by_puzzle_hash(
-    wallet: &Wallet,
-    puzzle_hash: Bytes32,
-    asset_id: Bytes32,
-) -> GetCatBalanceByPuzzleHashResponse {
-    let cats = fetch_filtered_cats(wallet, None, asset_id, Some(puzzle_hash))
-        .await
-        .unwrap();
-    let balance = cats.iter().map(|cat| cat.coin.amount).sum();
-    GetCatBalanceByPuzzleHashResponse { balance }
+    pub async fn get_cat_balance_by_puzzle_hash(
+        &self,
+        req: GetCatBalanceByPuzzleHash,
+    ) -> Result<GetCatBalanceByPuzzleHashResponse, Error> {
+        let wallet = self.wallet()?;
+        let puzzle_hash = parse_hash(req.puzzle_hash)?;
+        let asset_id = parse_asset_id(req.asset_id)?;
+        
+        let cats = fetch_filtered_cats(wallet, None, asset_id, Some(puzzle_hash))
+            .await?;
+        let balance = cats.iter().map(|cat| cat.coin.amount).sum();
+        
+        Ok(GetCatBalanceByPuzzleHashResponse { balance })
+    }
 }

@@ -11,7 +11,7 @@ use crate::WalletError;
 
 use super::Wallet;
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletNftMint {
     pub metadata: NftMetadata,
     pub p2_puzzle_hash: Option<Bytes32>,
