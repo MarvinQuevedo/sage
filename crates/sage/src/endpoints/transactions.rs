@@ -20,7 +20,7 @@ use tokio::time::timeout;
 use crate::{
     fetch_cats, fetch_coins, fetch_filtered_cats, fetch_filtered_coins, json_bundle, json_spend,
     parse_asset_id, parse_cat_amount, parse_did_id, parse_hash, parse_nft_id, rust_bundle,
-    rust_spend, ConfirmationInfo, Result, Sage, Error,
+    rust_spend, ConfirmationInfo, Error, Result, Sage,
 };
 impl Sage {
     pub async fn send_xch(&self, req: SendXch) -> Result<TransactionResponse> {
@@ -30,12 +30,12 @@ impl Sage {
 
         let p2_puzzle_hash = self.parse_address(req.address)?;
         let filter_puzzle_hash = req
-            .filter_puzzle_hash
+            .from_address
             .as_ref()
             .map(|ph| self.parse_address(ph.clone()))
             .transpose()?;
 
-        let selected_coins = if req.selected_coins.is_some() || req.filter_puzzle_hash.is_some() {
+        let selected_coins = if req.selected_coins.is_some() || req.from_address.is_some() {
             Some(fetch_filtered_coins(&wallet, req.selected_coins, filter_puzzle_hash).await?)
         } else {
             None
@@ -54,6 +54,7 @@ impl Sage {
                 false,
                 true,
                 selected_coins,
+                filter_puzzle_hash,
             )
             .await?;
         self.transact(coin_spends, req.auto_submit).await
@@ -79,7 +80,7 @@ impl Sage {
         }
 
         let coin_spends = wallet
-            .send_xch(amounts, fee, memos, false, true, None)
+            .send_xch(amounts, fee, memos, false, true, None, None)
             .await?;
         self.transact(coin_spends, req.auto_submit).await
     }
@@ -154,12 +155,12 @@ impl Sage {
         let asset_id = parse_asset_id(req.asset_id)?;
         let p2_puzzle_hash = self.parse_address(req.address)?;
         let filter_puzzle_hash = req
-            .filter_puzzle_hash
+            .from_address
             .as_ref()
             .map(|ph| self.parse_address(ph.clone()))
             .transpose()?;
 
-        let mut selected_cats = if req.selected_coins.is_some() || req.filter_puzzle_hash.is_some() {
+        let mut selected_cats = if req.selected_coins.is_some() || req.from_address.is_some() {
             Some(
                 fetch_filtered_cats(&wallet, req.selected_coins, asset_id, filter_puzzle_hash)
                     .await?,
@@ -175,7 +176,7 @@ impl Sage {
                 total_amount += cat.coin.amount;
                 required_cats.push(cat);
                 if total_amount >= amount {
-                    break;  // Stop once we have enough
+                    break; // Stop once we have enough
                 }
             }
             if total_amount < amount {
@@ -198,6 +199,7 @@ impl Sage {
                 false,
                 true,
                 selected_cats,
+                filter_puzzle_hash,
             )
             .await?;
         self.transact(coin_spends, req.auto_submit).await
@@ -224,7 +226,7 @@ impl Sage {
         }
 
         let coin_spends = wallet
-            .send_cat(asset_id, amounts, fee, memos, false, true, None)
+            .send_cat(asset_id, amounts, fee, memos, false, true, None, None)
             .await?;
         self.transact(coin_spends, req.auto_submit).await
     }

@@ -13,7 +13,7 @@ pub struct SendXch {
     #[serde(default)]
     pub auto_submit: bool,
     pub selected_coins: Option<Vec<String>>,
-    pub filter_puzzle_hash: Option<String>,
+    pub from_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,7 +89,7 @@ pub struct SendCat {
     #[serde(default)]
     pub auto_submit: bool,
     pub selected_coins: Option<Vec<String>>,
-    pub filter_puzzle_hash: Option<String>,
+    pub from_address: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

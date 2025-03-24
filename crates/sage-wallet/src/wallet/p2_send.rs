@@ -15,6 +15,7 @@ impl Wallet {
         hardened: bool,
         reuse: bool,
         selected_coins: Option<Vec<Coin>>,
+        change_puzzle_hash: Option<Bytes32>,
     ) -> Result<Vec<CoinSpend>, WalletError> {
         let total_amount = amounts
             .iter()
@@ -37,7 +38,11 @@ impl Wallet {
         };
         let selected: u128 = coins.iter().map(|coin| coin.amount as u128).sum();
 
-        let change_puzzle_hash = self.p2_puzzle_hash(hardened, reuse).await?;
+        let change_puzzle_hash = if let Some(change_puzzle_hash) = change_puzzle_hash {
+            change_puzzle_hash
+        } else {
+            self.p2_puzzle_hash(hardened, reuse).await?
+        };
 
         let change: u64 = (selected - total)
             .try_into()
@@ -85,6 +90,7 @@ mod tests {
                 false,
                 true,
                 None,
+                None,
             )
             .await?;
 
@@ -111,6 +117,7 @@ mod tests {
                 Vec::new(),
                 false,
                 true,
+                None,
                 None,
             )
             .await?;
@@ -139,6 +146,7 @@ mod tests {
                 true,
                 true,
                 None,
+                None,
             )
             .await?;
 
@@ -158,6 +166,7 @@ mod tests {
                 Vec::new(),
                 false,
                 true,
+                None,
                 None,
             )
             .await?;

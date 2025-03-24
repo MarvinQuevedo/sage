@@ -66,6 +66,7 @@ impl Wallet {
         hardened: bool,
         reuse: bool,
         selected_cats: Option<Vec<Cat>>,
+        change_puzzle_hash: Option<Bytes32>,
     ) -> Result<Vec<CoinSpend>, WalletError> {
         let fee_coins = if fee > 0 {
             let coins = fetch_first_20_coins(self).await?;
@@ -102,7 +103,11 @@ impl Wallet {
             .try_into()
             .expect("change amount overflow");
 
-        let change_puzzle_hash = self.p2_puzzle_hash(hardened, reuse).await?;
+        let change_puzzle_hash_ = if let Some(change_puzzle_hash) = change_puzzle_hash {
+            change_puzzle_hash
+        } else {
+            self.p2_puzzle_hash(hardened, reuse).await?
+        };
 
         let mut conditions = if fee_coins.is_empty() {
             Conditions::new()
@@ -119,7 +124,7 @@ impl Wallet {
             conditions = conditions.reserve_fee(fee);
 
             if fee_change > 0 {
-                conditions = conditions.create_coin(change_puzzle_hash, fee_change, None);
+                conditions = conditions.create_coin(change_puzzle_hash_, fee_change, None);
             }
         }
 
@@ -137,7 +142,7 @@ impl Wallet {
             conditions = conditions.create_coin(puzzle_hash, amount, Some(memos));
         }
 
-        let change_hint = ctx.hint(change_puzzle_hash)?;
+        let change_hint = ctx.hint(change_puzzle_hash_)?;
 
         self.spend_cat_coins(
             &mut ctx,
@@ -150,7 +155,7 @@ impl Wallet {
 
                 if cat_change > 0 {
                     conditions =
-                        conditions.create_coin(change_puzzle_hash, cat_change, Some(change_hint));
+                        conditions.create_coin(change_puzzle_hash_, cat_change, Some(change_hint));
                 }
 
                 (cat, conditions)
@@ -193,6 +198,7 @@ mod tests {
                 false,
                 true,
                 None,
+                None,
             )
             .await?;
         assert_eq!(coin_spends.len(), 1);
@@ -212,6 +218,7 @@ mod tests {
                 Vec::new(),
                 false,
                 true,
+                None,
                 None,
             )
             .await?;
