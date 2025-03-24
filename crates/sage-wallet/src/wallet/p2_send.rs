@@ -3,7 +3,7 @@ use chia_wallet_sdk::{Conditions, Memos, SpendContext};
 
 use crate::WalletError;
 
-use super::Wallet;
+use super::{p2_coin_management::fetch_first_20_coins, Wallet};
 
 impl Wallet {
     /// Sends the given amount of XCH to the given puzzle hash, minus the fee.
@@ -48,17 +48,47 @@ impl Wallet {
             .try_into()
             .expect("change amount overflow");
 
-        let mut ctx = SpendContext::new();
+        let fee_coins = if fee > 0 {
+            let coins = fetch_first_20_coins(self).await?;
+            let mut total_amount = 0;
+            let mut required_fee_coins = vec![];
+            for coin in coins {
+                if total_amount >= fee as u128 {
+                    break;
+                }
+                total_amount += coin.amount as u128;
+                required_fee_coins.push(coin);
+            }
+            required_fee_coins
+        } else {
+            Vec::new()
+        };
 
+        let mut ctx = SpendContext::new();
         let mut conditions = Conditions::new();
 
+        // Handle fee coins first
+        if !fee_coins.is_empty() {
+            let fee_coins_total: u128 = fee_coins.iter().map(|coin| coin.amount as u128).sum();
+            let first_fee_coin: Coin = fee_coins[0].clone();
+            let first_fee_coin_puzzle_hash = first_fee_coin.puzzle_hash;
+
+            // If fee coins amount is greater than fee, create change coin for the first fee coin's puzzle hash
+            if fee_coins_total > fee as u128 {
+                let fee_change = (fee_coins_total - fee as u128) as u64;
+                conditions = conditions.create_coin(first_fee_coin_puzzle_hash, fee_change, None);
+            }
+
+            conditions = conditions.reserve_fee(fee);
+            self.spend_p2_coins(&mut ctx, fee_coins, conditions.clone())
+                .await?;
+            conditions = Conditions::new();
+        }
+
+        // Handle main transaction
         for (puzzle_hash, amount) in amounts {
             conditions =
                 conditions.create_coin(puzzle_hash, amount, Some(Memos::new(ctx.alloc(&memos)?)));
-        }
-
-        if fee > 0 {
-            conditions = conditions.reserve_fee(fee);
         }
 
         if change > 0 {

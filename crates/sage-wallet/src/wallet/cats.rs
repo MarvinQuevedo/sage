@@ -123,8 +123,14 @@ impl Wallet {
 
             conditions = conditions.reserve_fee(fee);
 
+            if fee_coins.len() <= 1 {
+                return Err(WalletError::InvalidFeeCoins);
+            }
+
+            let fee_change_ph = fee_coins[0].puzzle_hash;
+
             if fee_change > 0 {
-                conditions = conditions.create_coin(change_puzzle_hash_, fee_change, None);
+                conditions = conditions.create_coin(fee_change_ph, fee_change, None);
             }
         }
 
