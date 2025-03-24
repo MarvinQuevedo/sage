@@ -1,6 +1,4 @@
-use chia::protocol::Bytes32;
 use sage_api::{GetCatBalanceByPuzzleHash, GetCatBalanceByPuzzleHashResponse, GetXchBalanceByPuzzleHash, GetXchBalanceByPuzzleHashResponse};
-use sage_wallet::Wallet;
 
 use crate::{fetch_filtered_cats, fetch_filtered_coins, parse_asset_id, parse_hash, Sage};
 use crate::Error;
