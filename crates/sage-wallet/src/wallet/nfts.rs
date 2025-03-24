@@ -9,7 +9,7 @@ use chia_wallet_sdk::{
 
 use crate::WalletError;
 
-use super::Wallet;
+use super::{p2_coin_management::fetch_first_20_coins, Wallet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletNftMint {
@@ -106,27 +106,28 @@ impl Wallet {
         let is_external = !self.db.is_p2_puzzle_hash(puzzle_hash).await?;
 
         let mut nfts = Vec::new();
-
         for nft_id in nft_ids {
             let Some(nft) = self.db.spendable_nft(nft_id).await? else {
                 return Err(WalletError::MissingNft(nft_id));
             };
-
             nfts.push(nft);
         }
 
-        let coins = if fee > 0 {
-            self.select_p2_coins(fee as u128).await?
+        let fee_coins = if fee > 0 {
+            let coins = fetch_first_20_coins(self).await?;
+            let mut total_amount = 0;
+            let mut required_fee_coins = vec![];
+            for coin in coins {
+                if total_amount >= fee as u128 {
+                    break;
+                }
+                total_amount += coin.amount as u128;
+                required_fee_coins.push(coin);
+            }
+            required_fee_coins
         } else {
             Vec::new()
         };
-        let selected: u128 = coins.iter().map(|coin| coin.amount as u128).sum();
-
-        let change: u64 = (selected - fee as u128)
-            .try_into()
-            .expect("change amount overflow");
-
-        let change_puzzle_hash = self.p2_puzzle_hash(hardened, reuse).await?;
 
         let mut ctx = SpendContext::new();
 
@@ -159,7 +160,12 @@ impl Wallet {
             }
 
             let memos = if let Some(memos) = &memos {
-                Some(memos[index].iter().map(|b| b.clone()).collect::<Vec<Bytes>>())
+                Some(
+                    memos[index]
+                        .iter()
+                        .map(|b| b.clone())
+                        .collect::<Vec<Bytes>>(),
+                )
             } else {
                 None
             };
@@ -169,15 +175,21 @@ impl Wallet {
         }
 
         if fee > 0 {
+            let fee_selected: u128 = fee_coins.iter().map(|coin| coin.amount as u128).sum();
+            let fee_change: u64 = (fee_selected - fee as u128)
+                .try_into()
+                .expect("fee change overflow");
+
             let mut conditions = Conditions::new()
                 .assert_concurrent_spend(nft_coin_ids[0])
                 .reserve_fee(fee);
 
-            if change > 0 {
-                conditions = conditions.create_coin(change_puzzle_hash, change, None);
+            if fee_change > 0 {
+                let change_puzzle_hash = self.p2_puzzle_hash(hardened, reuse).await?;
+                conditions = conditions.create_coin(change_puzzle_hash, fee_change, None);
             }
 
-            self.spend_p2_coins(&mut ctx, coins, conditions).await?;
+            self.spend_p2_coins(&mut ctx, fee_coins, conditions).await?;
         }
 
         Ok(ctx.take())
