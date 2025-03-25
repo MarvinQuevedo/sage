@@ -230,6 +230,23 @@ pub struct GetNftData {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "tauri", derive(specta::Type))]
+pub struct GetNftMemos {
+    pub nft_id: String,
+}
+
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
 pub struct GetNftDataResponse {
     pub data: Option<NftData>,
 }
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+pub struct GetNftMemosResponse {
+    pub memos: Option<Vec<String>>,
+}
+
+

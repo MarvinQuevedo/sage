@@ -137,6 +137,7 @@ pub async fn insert_puzzle(
             lineage_proof,
             info,
             metadata,
+            memos,
         } => {
             let data_hash = metadata.as_ref().and_then(|m| m.data_hash);
             let metadata_hash = metadata.as_ref().and_then(|m| m.metadata_hash);

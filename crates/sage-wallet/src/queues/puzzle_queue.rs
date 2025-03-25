@@ -161,7 +161,7 @@ impl PuzzleQueue {
 }
 
 /// Fetches info for a coin's puzzle and inserts it into the database.
-async fn fetch_puzzle(
+pub async fn fetch_puzzle(
     peer: &WalletPeer,
     genesis_challenge: Bytes32,
     coin: Coin,

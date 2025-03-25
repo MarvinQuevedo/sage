@@ -31,6 +31,7 @@ pub enum ChildKind {
         info: NftInfo<Program>,
         lineage_proof: LineageProof,
         metadata: Option<NftMetadata>,
+        memos: Option<Vec<Bytes32>>,
     },
 }
 
@@ -93,6 +94,12 @@ impl ChildKind {
         } else {
             None
         };
+        let memos_bytes_vec = if let Some(memos) = create_coin.memos {
+            let memos = Memos::<Vec<Bytes32>>::from_clvm(allocator, memos.value).ok();
+            memos.map(|memos| memos.value).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
         let unknown = Self::Unknown { hint };
 
@@ -153,6 +160,7 @@ impl ChildKind {
                     lineage_proof,
                     info: nft.info.with_metadata(metadata_program),
                     metadata,
+                    memos: Some(memos_bytes_vec),
                 });
             }
 

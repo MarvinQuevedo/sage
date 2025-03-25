@@ -5,7 +5,7 @@ use chia::{
     puzzles::{
         nft::NftMetadata, offer::SETTLEMENT_PAYMENTS_PUZZLE_HASH,
         singleton::SINGLETON_LAUNCHER_PUZZLE_HASH,
-    },
+    }, traits::Streamable,
 };
 use chia_wallet_sdk::{decode_address, encode_address, Nft};
 use clvmr::Allocator;
@@ -15,21 +15,22 @@ use sage_api::{
     DerivationRecord, DidRecord, GetCat, GetCatCoins, GetCatCoinsResponse, GetCatResponse, GetCats,
     GetCatsResponse, GetDerivations, GetDerivationsResponse, GetDids, GetDidsResponse,
     GetMinterDidIds, GetMinterDidIdsResponse, GetNft, GetNftCollection, GetNftCollectionResponse,
-    GetNftCollections, GetNftCollectionsResponse, GetNftData, GetNftDataResponse, GetNftResponse,
-    GetNfts, GetNftsResponse, GetPendingTransactions, GetPendingTransactionsResponse,
-    GetSyncStatus, GetSyncStatusResponse, GetTransaction, GetTransactionResponse, GetTransactions,
-    GetTransactionsResponse, GetXchCoins, GetXchCoinsResponse, NftCollectionRecord, NftData,
-    NftRecord, NftSortMode as ApiNftSortMode, PendingTransactionRecord, TransactionCoin,
-    TransactionRecord,
+    GetNftCollections, GetNftCollectionsResponse, GetNftData, GetNftDataResponse, GetNftMemos,
+    GetNftMemosResponse, GetNftResponse, GetNfts, GetNftsResponse, GetPendingTransactions,
+    GetPendingTransactionsResponse, GetSyncStatus, GetSyncStatusResponse, GetTransaction,
+    GetTransactionResponse, GetTransactions, GetTransactionsResponse, GetXchCoins,
+    GetXchCoinsResponse, NftCollectionRecord, NftData, NftRecord, NftSortMode as ApiNftSortMode,
+    PendingTransactionRecord, TransactionCoin, TransactionRecord,
 };
 use sage_database::{
     CoinKind, CoinStateRow, Database, NftGroup, NftRow, NftSearchParams, NftSortMode,
 };
 use sage_wallet::WalletError;
+use sage_wallet::{fetch_puzzle, ChildKind};
 
 use crate::{
-    parse_asset_id, parse_collection_id, parse_did_id, parse_nft_id, Error, Result, Sage,
-    BURN_PUZZLE_HASH,
+    parse_asset_id, parse_collection_id, parse_did_id, parse_genesis_challenge, parse_nft_id,
+    Error, Result, Sage, BURN_PUZZLE_HASH,
 };
 
 impl Sage {
@@ -494,6 +495,42 @@ impl Sage {
         Ok(GetNftResponse {
             nft: Some(self.nft_record(nft_row, nft, collection_name)?),
         })
+    }
+
+    pub async fn get_nft_memos(&self, req: GetNftMemos) -> Result<GetNftMemosResponse> {
+        let wallet = self.wallet()?;
+        let peer = self.peer_state.lock().await.acquire_peer().unwrap();
+
+        let nft_id = parse_nft_id(req.nft_id)?;
+        let genesis_challenge = parse_genesis_challenge(self.network().agg_sig_me.clone()).unwrap();
+
+        let nft_row = wallet.db.nft_row(nft_id).await?;
+
+        if let Some(nft_row) = nft_row {
+            let coin = wallet.db.coin_state(nft_row.coin_id).await?;
+            if let Some(coin) = coin {
+                let result = fetch_puzzle(&peer, genesis_challenge, coin.coin).await;
+                if let Ok(result) = result {
+                    let kind = result.0;
+                    match kind {
+                        ChildKind::Nft { memos, .. } => {
+                            let memos_vec: Vec<String> = memos
+                                .iter()
+                                .filter_map(|memo| memo.to_bytes().ok().map(|bytes| hex::encode(bytes)))
+                                .collect();
+                            return Ok(GetNftMemosResponse {
+                                memos: Some(memos_vec),
+                            });
+                        }
+                        _ => {
+                            return Ok(GetNftMemosResponse { memos: None });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(GetNftMemosResponse { memos: None })
     }
 
     pub async fn get_nft_data(&self, req: GetNftData) -> Result<GetNftDataResponse> {
