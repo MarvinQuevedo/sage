@@ -105,6 +105,6 @@ pub enum WalletError {
     #[error("Empty bulk transfer")]
     EmptyBulkTransfer,
 
-    #[error("Invalid fee coins")]
-    InvalidFeeCoins,
+    #[error("Fee coins not available")]
+    FeeCoinsNotAvailable,
 }

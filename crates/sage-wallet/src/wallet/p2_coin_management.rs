@@ -237,7 +237,9 @@ pub async fn fetch_first_20_coins(wallet: &Wallet) -> Result<Vec<Coin>, WalletEr
             .collect();
         Ok(coins)
     } else {
-        Err(WalletError::CoinSelection(CoinSelectionError::NoSpendableCoins))
+        Err(WalletError::CoinSelection(
+            CoinSelectionError::NoSpendableCoins,
+        ))
     }
 }
 
@@ -260,25 +262,23 @@ pub async fn fetch_filtered_coins(
                 Ok(coins)
             }
         } else {
-            Err(WalletError::CoinSelection(CoinSelectionError::NoSpendableCoins))
+            Err(WalletError::CoinSelection(
+                CoinSelectionError::NoSpendableCoins,
+            ))
         }
     } else {
         // Use existing coin fetching logic if no specific coins selected
         let mut coins = Vec::new();
-        let rows = wallet.db.p2_coin_states().await?;
+        let rows = wallet.db.spendable_coins().await?;
 
-        for row in rows {
-            if row.coin_state.spent_height.is_some() {
-                continue;
-            }
-
+        for coin in rows {
             if let Some(puzzle_hash) = p2_puzzle_hash {
-                if row.coin_state.coin.puzzle_hash != puzzle_hash {
+                if coin.puzzle_hash != puzzle_hash {
                     continue;
                 }
             }
 
-            coins.push(row.coin_state.coin);
+            coins.push(coin);
         }
 
         Ok(coins)

@@ -1,4 +1,4 @@
-use crate::Wallet; 
+use crate::Wallet;
 use chia::protocol::{Bytes32, Coin};
 use chia_wallet_sdk::Cat;
 use sage_database::DatabaseError;
@@ -59,7 +59,12 @@ pub async fn fetch_coins(wallet: &Wallet, coin_ids: Vec<String>) -> Result<Vec<C
     let mut coins = Vec::new();
 
     for coin_id in &coin_ids {
-        let Some(coin_state) = wallet.db.coin_state(*coin_id).await.map_err(|e| CoinError::InvalidCoinId(e.to_string()))? else {
+        let Some(coin_state) = wallet
+            .db
+            .coin_state(*coin_id)
+            .await
+            .map_err(|e| CoinError::InvalidCoinId(e.to_string()))?
+        else {
             return Err(CoinError::CoinNotFound(coin_id.to_string()));
         };
 
@@ -82,7 +87,12 @@ pub async fn fetch_cats(wallet: &Wallet, coin_ids: Vec<String>) -> Result<Vec<Ca
     let mut cats = Vec::new();
 
     for coin_id in coin_ids {
-        let Some(coin_state) = wallet.db.coin_state(coin_id).await.map_err(|e| CoinError::InvalidCoinId(e.to_string()))? else {
+        let Some(coin_state) = wallet
+            .db
+            .coin_state(coin_id)
+            .await
+            .map_err(|e| CoinError::InvalidCoinId(e.to_string()))?
+        else {
             return Err(CoinError::CatCoinNotFound(coin_id.to_string()));
         };
 
@@ -90,7 +100,12 @@ pub async fn fetch_cats(wallet: &Wallet, coin_ids: Vec<String>) -> Result<Vec<Ca
             return Err(CoinError::CoinAlreadySpent(coin_id.to_string()));
         };
 
-        let Some(cat) = wallet.db.cat_coin(coin_id).await.map_err(|e| CoinError::InvalidCoinId(e.to_string()))? else {
+        let Some(cat) = wallet
+            .db
+            .cat_coin(coin_id)
+            .await
+            .map_err(|e| CoinError::InvalidCoinId(e.to_string()))?
+        else {
             return Err(CoinError::CatCoinNotFound(coin_id.to_string()));
         };
 
@@ -121,20 +136,16 @@ pub async fn fetch_filtered_coins(
     } else {
         // Use existing coin fetching logic if no specific coins selected
         let mut coins = Vec::new();
-        let rows = wallet.db.p2_coin_states().await?;
+        let rows = wallet.db.spendable_coins().await?;
 
-        for row in rows {
-            if row.coin_state.spent_height.is_some() {
-                continue;
-            }
-
+        for coin in rows {
             if let Some(puzzle_hash) = p2_puzzle_hash {
-                if row.coin_state.coin.puzzle_hash != puzzle_hash {
+                if coin.puzzle_hash != puzzle_hash {
                     continue;
                 }
             }
 
-            coins.push(row.coin_state.coin);
+            coins.push(coin);
         }
 
         Ok(coins)

@@ -123,8 +123,8 @@ impl Wallet {
 
             conditions = conditions.reserve_fee(fee);
 
-            if fee_coins.len() <= 1 {
-                return Err(WalletError::InvalidFeeCoins);
+            if fee_coins.len() < 1 {
+                return Err(WalletError::FeeCoinsNotAvailable);
             }
 
             let fee_change_ph = fee_coins[0].puzzle_hash;

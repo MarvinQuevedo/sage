@@ -4,7 +4,7 @@ use chia::{
     protocol::{Bytes, CoinSpend},
     puzzles::nft::NftMetadata,
 };
-use chia_wallet_sdk::{encode_address, MetadataUpdate};
+use chia_wallet_sdk::{encode_address, Cat, MetadataUpdate};
 use sage_api::{
     AddNftUri, AssignNftsToDid, BulkMintNfts, BulkMintNftsResponse, BulkSendCat, BulkSendXch,
     CombineCat, CombineXch, CreateDid, IssueCat, NftUriKind, NormalizeDids, SendCat, SendXch,
@@ -160,11 +160,24 @@ impl Sage {
             .map(|ph| self.parse_address(ph.clone()))
             .transpose()?;
 
-        let mut selected_cats = if req.selected_coins.is_some() || req.from_address.is_some() {
-            Some(
-                fetch_filtered_cats(&wallet, req.selected_coins, asset_id, filter_puzzle_hash)
-                    .await?,
-            )
+        let mut selected_cats: Option<Vec<Cat>> = if req.selected_coins.is_some()
+            || req.from_address.is_some()
+        {
+            let cat_coins = wallet.db.spendable_cat_coins(asset_id).await?;
+            let coin_ids: Vec<String> = cat_coins
+                .into_iter()
+                .filter(|cat| {
+                    if let Some(ref selected_coins) = req.selected_coins {
+                        selected_coins.contains(&cat.coin.coin_id().to_string())
+                    } else if let Some(filter_ph) = filter_puzzle_hash {
+                        cat.p2_puzzle_hash == filter_ph
+                    } else {
+                        true
+                    }
+                })
+                .map(|cat| cat.coin.coin_id().to_string())
+                .collect();
+            Some(fetch_filtered_cats(&wallet, Some(coin_ids), asset_id, filter_puzzle_hash).await?)
         } else {
             None
         };

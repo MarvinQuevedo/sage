@@ -1,6 +1,6 @@
 use chia::protocol::{Bytes32, Coin};
 use chia_wallet_sdk::Cat;
-use hex_literal::hex;  
+use hex_literal::hex;
 use sage_wallet::Wallet;
 
 use crate::{Error, Result};
@@ -81,20 +81,16 @@ pub async fn fetch_filtered_coins(
     } else {
         // Use existing coin fetching logic if no specific coins selected
         let mut coins = Vec::new();
-        let rows = wallet.db.p2_coin_states().await?;
+        let rows = wallet.db.spendable_coins().await?;
 
-        for row in rows {
-            if row.coin_state.spent_height.is_some() {
-                continue;
-            }
-
+        for coin in rows {
             if let Some(puzzle_hash) = p2_puzzle_hash {
-                if row.coin_state.coin.puzzle_hash != puzzle_hash {
+                if coin.puzzle_hash != puzzle_hash {
                     continue;
                 }
             }
 
-            coins.push(row.coin_state.coin);
+            coins.push(coin);
         }
 
         Ok(coins)
