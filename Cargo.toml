@@ -4,7 +4,8 @@ keywords = ["chia", "wallet", "blockchain", "crypto"]
 categories = ["cryptography::cryptocurrencies"]
 
 [workspace]
-members = ["src-tauri", "crates/*", "crates/sage-api/macro", "tauri-plugin-sage"]
+members = ["crates/*", "crates/sage-api/macro"]
+exclude = ["src-tauri", "tauri-plugin-sage"]
 resolver = "2"
 
 [workspace.lints.rust]
