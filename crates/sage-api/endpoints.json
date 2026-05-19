@@ -62,6 +62,8 @@
   "create_transaction": true,
   "sign_coin_spends": true,
   "view_coin_spends": true,
+  "required_signatures": true,
+  "submit_with_signatures": true,
   "submit_transaction": true,
   "make_offer": true,
   "take_offer": true,

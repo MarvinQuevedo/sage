@@ -316,6 +316,7 @@ impl Sage {
                 .map(|address| Address::decode(address))
                 .transpose()?
                 .map(|address| address.puzzle_hash),
+            wallet_config.arbor_only,
         ));
 
         self.wallet = Some(wallet.clone());

@@ -177,6 +177,14 @@ pub struct ImportKey {
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(nullable = true))]
     pub emoji: Option<String>,
+    /// External-signer wallet (e.g. Tangem card): `key` must be a BLS public
+    /// key. Creates exactly one `p2_delegated_conditions` ("arbor") puzzle and
+    /// NO HD derivations (`derivation_index`/`hardened`/`unhardened` ignored).
+    /// Spends are built unsigned; sign with `required_signatures` +
+    /// `submit_with_signatures`.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(default = false))]
+    pub arbor_only: bool,
 }
 
 fn yes() -> bool {

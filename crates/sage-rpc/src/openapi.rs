@@ -92,6 +92,7 @@ pub fn generate_openapi() -> OpenApi {
         .schema_from::<sage_api::TransactionCoinRecord>()
         .schema_from::<sage_api::CoinSpendJson>()
         .schema_from::<sage_api::SpendBundleJson>()
+        .schema_from::<sage_api::RequiredSignatureJson>()
         .schema_from::<sage_api::CoinJson>()
         .schema_from::<sage_api::OfferRecord>()
         .schema_from::<sage_api::OfferRecordStatus>()

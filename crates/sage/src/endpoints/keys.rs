@@ -128,6 +128,16 @@ impl Sage {
             key_hex = &key_hex[2..];
         }
 
+        // External-signer ("arbor"/Tangem) wallets: only the BLS public key is
+        // known. Enforce pubkey-only up front (before touching the keychain)
+        // so we never store secrets or birth HD derivations for them.
+        if req.arbor_only {
+            let bytes = hex::decode(key_hex).map_err(|_| Error::InvalidKey)?;
+            if bytes.len() != 48 {
+                return Err(Error::InvalidKey);
+            }
+        }
+
         let (fingerprint, master_sk, master_pk) = if let Ok(bytes) = hex::decode(key_hex) {
             if let Ok(master_pk) = bytes.clone().try_into() {
                 let master_pk = PublicKey::from_bytes(&master_pk)?;
@@ -187,6 +197,7 @@ impl Sage {
             name: req.name,
             fingerprint,
             emoji: req.emoji,
+            arbor_only: req.arbor_only,
             ..Default::default()
         });
         self.config.global.fingerprint = Some(fingerprint);
@@ -199,7 +210,7 @@ impl Sage {
 
         let mut tx = db.tx().await?;
 
-        if req.unhardened.unwrap_or(true) {
+        if !req.arbor_only && req.unhardened.unwrap_or(true) {
             let intermediate_unhardened_pk = master_to_wallet_unhardened_intermediate(&master_pk);
 
             for index in 0..req.derivation_index {
@@ -219,7 +230,8 @@ impl Sage {
             }
         }
 
-        if req.hardened.unwrap_or(true)
+        if !req.arbor_only
+            && req.hardened.unwrap_or(true)
             && let Some(master_sk) = master_sk
         {
             let intermediate_hardened_sk = master_to_wallet_hardened_intermediate(&master_sk);

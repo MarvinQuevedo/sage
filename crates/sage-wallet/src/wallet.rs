@@ -41,9 +41,13 @@ pub struct Wallet {
     pub genesis_challenge: Bytes32,
     pub agg_sig_constants: AggSigConstants,
     pub change_p2_puzzle_hash: Option<Bytes32>,
+    /// External-signer ("arbor"/Tangem) wallet: exactly one
+    /// `p2_delegated_conditions` puzzle, no HD derivations, sign off-device.
+    pub arbor_only: bool,
 }
 
 impl Wallet {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Database,
         fingerprint: u32,
@@ -51,6 +55,7 @@ impl Wallet {
         genesis_challenge: Bytes32,
         agg_sig_constants: AggSigConstants,
         change_p2_puzzle_hash: Option<Bytes32>,
+        arbor_only: bool,
     ) -> Self {
         Self {
             db,
@@ -59,6 +64,7 @@ impl Wallet {
             genesis_challenge,
             agg_sig_constants,
             change_p2_puzzle_hash,
+            arbor_only,
         }
     }
 

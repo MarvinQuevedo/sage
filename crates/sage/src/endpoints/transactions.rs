@@ -10,20 +10,21 @@ use sage_api::{
     AddNftUri, AssignNftsToDid, AutoCombineCat, AutoCombineCatResponse, AutoCombineXch,
     AutoCombineXchResponse, BulkMintNfts, BulkMintNftsResponse, BulkSendCat, BulkSendXch, Combine,
     CreateDid, ExerciseOptions, FinalizeClawback, IssueCat, MintOption, MintOptionResponse,
-    MultiSend, NftUriKind, NormalizeDids, OptionAsset, SendCat, SendXch, SignCoinSpends,
-    SignCoinSpendsResponse, Split, SubmitTransaction, SubmitTransactionResponse,
-    TransactionResponse, TransferDids, TransferNfts, TransferOptions, ViewCoinSpends,
-    ViewCoinSpendsResponse,
+    MultiSend, NftUriKind, NormalizeDids, OptionAsset, RequiredSignatureJson, RequiredSignatures,
+    RequiredSignaturesResponse, SendCat, SendXch, SignCoinSpends, SignCoinSpendsResponse, Split,
+    SubmitTransaction, SubmitTransactionResponse, SubmitWithSignatures,
+    SubmitWithSignaturesResponse, TransactionResponse, TransferDids, TransferNfts, TransferOptions,
+    ViewCoinSpends, ViewCoinSpendsResponse,
 };
 use sage_assets::fetch_uris_without_hash;
 use sage_database::{Asset, AssetKind};
-use sage_wallet::{MultiSendPayment, WalletNftMint, WalletOptionMint};
+use sage_wallet::{MultiSendPayment, WalletError, WalletNftMint, WalletOptionMint};
 use tokio::time::timeout;
 
 use crate::{
     ConfirmationInfo, Error, Result, Sage, json_bundle, json_spend, parse_amount, parse_asset_id,
     parse_coin_ids, parse_did_id, parse_hash, parse_memos, parse_nft_id, parse_option_id,
-    rust_bundle, rust_spend,
+    parse_signature, rust_bundle, rust_spend,
 };
 
 impl Sage {
@@ -517,6 +518,73 @@ impl Sage {
             summary: self
                 .summarize(coin_spends, ConfirmationInfo::default())
                 .await?,
+        })
+    }
+
+    /// Compute the AGG_SIG messages an external signer must produce for the
+    /// given coin spends, without signing in-process. This drives hardware /
+    /// external-signer wallets (e.g. Tangem cards, which spend the
+    /// `p2_delegated_conditions` / "arbor" puzzle): the returned messages are
+    /// consensus-correct, so the caller signs them with the card and then
+    /// aggregates+broadcasts via [`Self::submit_with_signatures`].
+    pub async fn required_signatures(
+        &self,
+        req: RequiredSignatures,
+    ) -> Result<RequiredSignaturesResponse> {
+        let coin_spends = req
+            .coin_spends
+            .into_iter()
+            .map(rust_spend)
+            .collect::<Result<Vec<_>>>()?;
+
+        let constants = AggSigConstants::new(self.network().agg_sig_me());
+
+        let required =
+            RequiredSignature::from_coin_spends(&mut Allocator::new(), &coin_spends, &constants)
+                .map_err(|e| Error::Wallet(WalletError::Signer(e)))?;
+
+        let mut signatures = Vec::new();
+
+        for required in required {
+            let RequiredSignature::Bls(required) = required else {
+                continue;
+            };
+
+            signatures.push(RequiredSignatureJson {
+                public_key: format!("0x{}", hex::encode(required.public_key.to_bytes())),
+                message: format!("0x{}", hex::encode(required.message())),
+            });
+        }
+
+        Ok(RequiredSignaturesResponse { signatures })
+    }
+
+    /// Aggregate externally produced BLS signatures into a spend bundle for the
+    /// given coin spends, and optionally broadcast it. Pairs with
+    /// [`Self::required_signatures`].
+    pub async fn submit_with_signatures(
+        &self,
+        req: SubmitWithSignatures,
+    ) -> Result<SubmitWithSignaturesResponse> {
+        let coin_spends = req
+            .coin_spends
+            .into_iter()
+            .map(rust_spend)
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut aggregated_signature = Signature::default();
+        for signature in req.signatures {
+            aggregated_signature += &parse_signature(signature)?;
+        }
+
+        let spend_bundle = SpendBundle::new(coin_spends, aggregated_signature);
+
+        if req.auto_submit {
+            self.submit(spend_bundle.clone()).await?;
+        }
+
+        Ok(SubmitWithSignaturesResponse {
+            spend_bundle: json_bundle(&spend_bundle),
         })
     }
 

@@ -27,6 +27,19 @@ pub struct CoinSpendJson {
     pub solution: String,
 }
 
+/// A single BLS signature that an external signer (e.g. a Tangem card) must
+/// produce for a set of coin spends. `message` is the exact, consensus-correct
+/// AGG_SIG_* message; the signer signs it with the key identified by
+/// `public_key`, and the resulting signatures are aggregated back via
+/// `submit_with_signatures`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RequiredSignatureJson {
+    pub public_key: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "tauri", derive(specta::Type))]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

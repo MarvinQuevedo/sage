@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Amount, CoinSpendJson, SpendBundleJson, TransactionSummary};
+use crate::{Amount, CoinSpendJson, RequiredSignatureJson, SpendBundleJson, TransactionSummary};
 
 /// Send XCH to an address
 #[cfg_attr(
@@ -777,6 +777,64 @@ pub struct ViewCoinSpends {
 pub struct ViewCoinSpendsResponse {
     /// Transaction summary
     pub summary: TransactionSummary,
+}
+
+/// Compute the BLS signatures an external signer must produce
+#[cfg_attr(
+    feature = "openapi",
+    crate::openapi_attr(
+        tag = "Transactions",
+        description = "Compute the exact AGG_SIG messages required to sign a set of coin spends, without signing them in-process. Used for hardware/external signers such as Tangem cards (which spend the p2_delegated_conditions / 'arbor' puzzle): build the transaction with `auto_submit: false`, get the messages here, sign them on the card, then aggregate and broadcast with `submit_with_signatures`."
+    )
+)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RequiredSignatures {
+    /// Coin spends to compute required signatures for
+    pub coin_spends: Vec<CoinSpendJson>,
+}
+
+/// Response with the required BLS signatures
+#[cfg_attr(feature = "openapi", crate::openapi_attr(tag = "Transactions"))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RequiredSignaturesResponse {
+    /// One entry per required BLS signature (public key + message to sign)
+    pub signatures: Vec<RequiredSignatureJson>,
+}
+
+/// Attach externally produced signatures and optionally broadcast
+#[cfg_attr(
+    feature = "openapi",
+    crate::openapi_attr(
+        tag = "Transactions",
+        description = "Aggregate externally produced BLS signatures (e.g. from a Tangem card) into a spend bundle for the given coin spends, and optionally broadcast it. Pair with `required_signatures`."
+    )
+)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SubmitWithSignatures {
+    /// Coin spends that were signed
+    pub coin_spends: Vec<CoinSpendJson>,
+    /// Hex-encoded BLS signatures to aggregate (order does not matter)
+    pub signatures: Vec<String>,
+    /// Whether to broadcast the resulting spend bundle now
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(default = false))]
+    pub auto_submit: bool,
+}
+
+/// Response with the aggregated, externally signed spend bundle
+#[cfg_attr(feature = "openapi", crate::openapi_attr(tag = "Transactions"))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct SubmitWithSignaturesResponse {
+    /// The aggregated, signed spend bundle
+    pub spend_bundle: SpendBundleJson,
 }
 
 /// Submit a transaction to the network

@@ -293,6 +293,12 @@ async fn auto_insert_unhardened_derivations(
     wallet: &Wallet,
     tx: &mut DatabaseTx<'_>,
 ) -> Result<Vec<Bytes32>, WalletError> {
+    // External-signer ("arbor"/Tangem) wallets have exactly one
+    // `p2_delegated_conditions` puzzle and no HD derivations — never birth any.
+    if wallet.arbor_only {
+        return Ok(Vec::new());
+    }
+
     let mut derivations = Vec::new();
     let mut next_index = tx.derivation_index(false).await?;
 

@@ -31,6 +31,15 @@ pub struct Wallet {
     pub emoji: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub change_address: Option<String>,
+    /// External-signer ("arbor"/Tangem) wallet: only a public key is known,
+    /// there is exactly one `p2_delegated_conditions` puzzle and no HD
+    /// derivations. Transactions are built unsigned and signed off-device.
+    #[serde(skip_serializing_if = "is_false")]
+    pub arbor_only: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Wallet {
@@ -48,6 +57,7 @@ impl Default for Wallet {
             delta_sync: None,
             emoji: None,
             change_address: None,
+            arbor_only: false,
         }
     }
 }
@@ -68,6 +78,7 @@ mod tests {
             change_address: Some(
                 "xch1dtfukqqka3ftqtdlhmc5spc5vd44h7ejrtnjcewxlueam5yrnnqqyczg8t".to_string(),
             ),
+            arbor_only: false,
         }
     }
 

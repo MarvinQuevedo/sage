@@ -85,6 +85,18 @@ impl Wallet {
         if let Some(change_p2_puzzle_hash) = self.change_p2_puzzle_hash {
             return Ok(change_p2_puzzle_hash);
         }
+        // External-signer ("arbor"/Tangem) wallets have no HD derivations:
+        // the single `p2_delegated_conditions` puzzle is both the receive and
+        // the change address.
+        if self.arbor_only {
+            return self
+                .db
+                .custody_p2_puzzle_hashes()
+                .await?
+                .into_iter()
+                .next()
+                .ok_or(WalletError::InsufficientDerivations);
+        }
         Ok(self.p2_puzzle_hashes(1, false, true).await?[0])
     }
 }
