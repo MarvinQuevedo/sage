@@ -111,7 +111,16 @@ pub fn generate_openapi() -> OpenApi {
         .schema_from::<sage_api::UpdateNftAction>()
         .schema_from::<sage_api::FeeAction>()
         .schema_from::<sage_api::NewNftUri>()
-        .schema_from::<sage_api::NftTransfer>();
+        .schema_from::<sage_api::NftTransfer>()
+        // WalletConnect helper types (referenced by the 5 tauri endpoints).
+        // Full path: not glob-re-exported to avoid colliding with the
+        // similarly-named offers/transactions helper types.
+        .schema_from::<sage_api::wallet_connect::AssetCoinType>()
+        .schema_from::<sage_api::wallet_connect::SpendableCoin>()
+        .schema_from::<sage_api::wallet_connect::Coin>()
+        .schema_from::<sage_api::wallet_connect::LineageProof>()
+        .schema_from::<sage_api::wallet_connect::CoinSpend>()
+        .schema_from::<sage_api::wallet_connect::SpendBundle>();
 
     // Endpoints - automatically generated from endpoints.json
     components = sage_api_macro::register_openapi_types! {};
