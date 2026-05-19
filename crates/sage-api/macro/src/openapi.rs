@@ -87,9 +87,13 @@ pub fn impl_openapi_registration(_input: TokenStream1) -> TokenStream1 {
     use indexmap::IndexMap;
 
     // Read endpoints.json at compile time
-    let endpoints: IndexMap<String, bool> =
+    let mut endpoints: IndexMap<String, bool> =
         serde_json::from_str(include_str!("../../endpoints.json"))
             .expect("Failed to parse endpoints.json");
+    let tauri_endpoints: IndexMap<String, bool> =
+        serde_json::from_str(include_str!("../../endpoints-tauri.json"))
+            .expect("Failed to parse endpoints-tauri.json");
+    endpoints.extend(tauri_endpoints);
 
     // Endpoints that use type aliases or don't implement ToSchema for their responses
     let skip_endpoints = ["get_networks", "get_network"];
@@ -130,9 +134,13 @@ pub fn impl_endpoint_metadata(_input: TokenStream1) -> TokenStream1 {
     use indexmap::IndexMap;
 
     // Read endpoints.json at compile time
-    let endpoints: IndexMap<String, bool> =
+    let mut endpoints: IndexMap<String, bool> =
         serde_json::from_str(include_str!("../../endpoints.json"))
             .expect("Failed to parse endpoints.json");
+    let tauri_endpoints: IndexMap<String, bool> =
+        serde_json::from_str(include_str!("../../endpoints-tauri.json"))
+            .expect("Failed to parse endpoints-tauri.json");
+    endpoints.extend(tauri_endpoints);
 
     let match_arms = endpoints.keys().map(|endpoint_name| {
         let type_name = endpoint_name.to_case(Case::Pascal);
@@ -166,9 +174,13 @@ pub fn impl_endpoint_metadata(_input: TokenStream1) -> TokenStream1 {
 pub fn impl_request_schemas(_input: TokenStream1) -> TokenStream1 {
     use indexmap::IndexMap;
 
-    let endpoints: IndexMap<String, bool> =
+    let mut endpoints: IndexMap<String, bool> =
         serde_json::from_str(include_str!("../../endpoints.json"))
             .expect("Failed to parse endpoints.json");
+    let tauri_endpoints: IndexMap<String, bool> =
+        serde_json::from_str(include_str!("../../endpoints-tauri.json"))
+            .expect("Failed to parse endpoints-tauri.json");
+    endpoints.extend(tauri_endpoints);
 
     let match_arms = endpoints.keys().map(|endpoint_name| {
         let type_name = endpoint_name.to_case(Case::Pascal);
@@ -197,9 +209,13 @@ pub fn impl_request_schemas(_input: TokenStream1) -> TokenStream1 {
 pub fn impl_response_schemas(_input: TokenStream1) -> TokenStream1 {
     use indexmap::IndexMap;
 
-    let endpoints: IndexMap<String, bool> =
+    let mut endpoints: IndexMap<String, bool> =
         serde_json::from_str(include_str!("../../endpoints.json"))
             .expect("Failed to parse endpoints.json");
+    let tauri_endpoints: IndexMap<String, bool> =
+        serde_json::from_str(include_str!("../../endpoints-tauri.json"))
+            .expect("Failed to parse endpoints-tauri.json");
+    endpoints.extend(tauri_endpoints);
 
     // Special cases that need manual handling
     let special_responses = [

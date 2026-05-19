@@ -12,10 +12,15 @@ use utoipa::openapi::{
 /// Generates the `OpenAPI` specification for all RPC endpoints
 /// Dynamically reads from endpoints.json at compile time
 pub fn generate_openapi() -> OpenApi {
-    // Read endpoints at compile time from the same JSON file used by the macro
-    let endpoints: IndexMap<String, bool> =
+    // Read endpoints at compile time. The tauri list (WalletConnect
+    // endpoints) is merged so the spec documents all 105 endpoints.
+    let mut endpoints: IndexMap<String, bool> =
         serde_json::from_str(include_str!("../../sage-api/endpoints.json"))
             .expect("Failed to parse endpoints.json");
+    let tauri_endpoints: IndexMap<String, bool> =
+        serde_json::from_str(include_str!("../../sage-api/endpoints-tauri.json"))
+            .expect("Failed to parse endpoints-tauri.json");
+    endpoints.extend(tauri_endpoints);
 
     // Collect unique tags from all endpoints (BTreeSet keeps them sorted)
     let mut tags = BTreeSet::new();
