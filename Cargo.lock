@@ -5900,6 +5900,8 @@ dependencies = [
  "axum-server",
  "bip39",
  "chia-wallet-sdk",
+ "hex",
+ "hex-literal",
  "indexmap 2.12.1",
  "rand 0.8.5",
  "rand_chacha 0.3.1",

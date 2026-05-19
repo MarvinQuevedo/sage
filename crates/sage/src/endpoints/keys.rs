@@ -357,6 +357,7 @@ impl Sage {
                 has_secrets: self.keychain.has_secret_key(fingerprint),
                 network_id,
                 emoji: wallet_config.emoji,
+                arbor_only: wallet_config.arbor_only,
             }),
         })
     }
@@ -391,6 +392,7 @@ impl Sage {
                 has_secrets: self.keychain.has_secret_key(wallet.fingerprint),
                 network_id: wallet.network.clone().unwrap_or_else(|| self.network_id()),
                 emoji: wallet.emoji.clone(),
+                arbor_only: wallet.arbor_only,
             });
         }
 

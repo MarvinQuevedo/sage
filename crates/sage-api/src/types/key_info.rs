@@ -11,6 +11,11 @@ pub struct KeyInfo {
     pub has_secrets: bool,
     pub network_id: String,
     pub emoji: Option<String>,
+    /// External-signer ("arbor"/Tangem) wallet: only a public key, exactly
+    /// one `p2_delegated_conditions` puzzle, no HD derivations. Spends must
+    /// be built unsigned and signed off-device.
+    #[serde(default)]
+    pub arbor_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
