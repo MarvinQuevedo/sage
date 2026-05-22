@@ -42,6 +42,13 @@ pub struct Sage {
     pub wallet_config: WalletConfig,
     pub network_list: NetworkList,
     pub keychain: Keychain,
+    /// Passphrase used to encrypt/decrypt the keychain secrets at rest.
+    /// Empty (`b""`) means "no user passphrase" — legacy behaviour, where
+    /// `keys.bin` is effectively plaintext. The Flutter binding sets this via
+    /// `unlock_keychain` after login to a value derived from the user's PIN +
+    /// a device-bound key, restoring two-factor protection. Held in memory
+    /// only; never persisted.
+    pub keychain_password: Vec<u8>,
     pub wallet: Option<Arc<Wallet>>,
     pub peer_state: Arc<Mutex<PeerState>>,
     pub command_sender: mpsc::Sender<SyncCommand>,
@@ -57,6 +64,7 @@ impl Sage {
             wallet_config: WalletConfig::default(),
             network_list: NetworkList::default(),
             keychain: Keychain::default(),
+            keychain_password: Vec::new(),
             wallet: None,
             peer_state: Arc::new(Mutex::new(PeerState::default())),
             command_sender: mpsc::channel(1).0,

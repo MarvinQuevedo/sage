@@ -17,8 +17,9 @@ use sage_api::{
     DeleteDatabase, DeleteDatabaseResponse, DeleteKey, DeleteKeyResponse, GenerateMnemonic,
     GenerateMnemonicResponse, GetKey, GetKeyResponse, GetKeys, GetKeysResponse, GetSecretKey,
     GetSecretKeyResponse, ImportKey, ImportKeyResponse, KeyInfo, KeyKind, Login, LoginResponse,
-    Logout, LogoutResponse, RenameKey, RenameKeyResponse, Resync, ResyncResponse, SecretKeyInfo,
-    SetWalletEmoji, SetWalletEmojiResponse,
+    Logout, LogoutResponse, RekeyKeychain, RekeyKeychainResponse, RenameKey, RenameKeyResponse,
+    Resync, ResyncResponse, SecretKeyInfo, SetWalletEmoji, SetWalletEmojiResponse, UnlockKeychain,
+    UnlockKeychainResponse,
 };
 use sage_config::Wallet;
 use sage_database::{Database, Derivation};
@@ -148,7 +149,8 @@ impl Sage {
                 let master_pk = master_sk.public_key();
 
                 let fingerprint = if req.save_secrets {
-                    self.keychain.add_secret_key(&master_sk, b"")?
+                    self.keychain
+                        .add_secret_key(&master_sk, &self.keychain_password)?
                 } else {
                     self.keychain.add_public_key(&master_pk)?
                 };
@@ -185,7 +187,8 @@ impl Sage {
             let master_sk = SecretKey::from_seed(&mnemonic.to_seed(""));
             let master_pk = master_sk.public_key();
             let fingerprint = if req.save_secrets {
-                self.keychain.add_mnemonic(&mnemonic, b"")?
+                self.keychain
+                    .add_mnemonic(&mnemonic, &self.keychain_password)?
             } else {
                 self.keychain.add_public_key(&master_pk)?
             };
@@ -363,7 +366,9 @@ impl Sage {
     }
 
     pub fn get_secret_key(&self, req: GetSecretKey) -> Result<GetSecretKeyResponse> {
-        let (mnemonic, Some(secret_key)) = self.keychain.extract_secrets(req.fingerprint, b"")?
+        let (mnemonic, Some(secret_key)) = self
+            .keychain
+            .extract_secrets(req.fingerprint, &self.keychain_password)?
         else {
             return Ok(GetSecretKeyResponse { secrets: None });
         };
@@ -374,6 +379,58 @@ impl Sage {
                 secret_key: hex::encode(secret_key.to_bytes()),
             }),
         })
+    }
+
+    /// Set the in-memory passphrase used to encrypt/decrypt keychain secrets.
+    /// Never persisted; must be supplied again every session. Does not touch
+    /// disk and does not verify the passphrase — a wrong one surfaces later as
+    /// a decrypt failure on the first secret-extracting operation.
+    pub fn unlock_keychain(&mut self, req: UnlockKeychain) -> Result<UnlockKeychainResponse> {
+        self.keychain_password = hex::decode(&req.password).map_err(|_| Error::InvalidKey)?;
+        Ok(UnlockKeychainResponse {})
+    }
+
+    /// Re-encrypt every stored secret from `old_password` to `new_password`.
+    /// Used to migrate a keychain written with no passphrase, or on PIN change.
+    /// Reads + re-adds each secret in place (same deterministic fingerprint);
+    /// public-only ("arbor"/Tangem) keys are left untouched. On success the
+    /// in-memory passphrase is updated to the new one and the keychain is
+    /// persisted. If any secret fails to decrypt with `old_password`, nothing
+    /// is saved and an error is returned (the on-disk keychain is unchanged).
+    pub fn rekey_keychain(&mut self, req: RekeyKeychain) -> Result<RekeyKeychainResponse> {
+        let old = hex::decode(&req.old_password).map_err(|_| Error::InvalidKey)?;
+        let new = hex::decode(&req.new_password).map_err(|_| Error::InvalidKey)?;
+
+        let fingerprints: Vec<u32> = self.keychain.fingerprints().collect();
+
+        // Decrypt everything up front so a wrong `old_password` aborts before
+        // we mutate the keychain at all.
+        let mut secrets = Vec::new();
+        for fingerprint in fingerprints {
+            if !self.keychain.has_secret_key(fingerprint) {
+                continue;
+            }
+            let (mnemonic, secret_key) = self.keychain.extract_secrets(fingerprint, &old)?;
+            secrets.push((fingerprint, mnemonic, secret_key));
+        }
+
+        let mut rekeyed = 0u32;
+        for (fingerprint, mnemonic, secret_key) in secrets {
+            self.keychain.remove(fingerprint);
+            if let Some(mnemonic) = mnemonic {
+                self.keychain.add_mnemonic(&mnemonic, &new)?;
+            } else if let Some(secret_key) = secret_key {
+                self.keychain.add_secret_key(&secret_key, &new)?;
+            } else {
+                continue;
+            }
+            rekeyed += 1;
+        }
+
+        self.keychain_password = new;
+        self.save_keychain()?;
+
+        Ok(RekeyKeychainResponse { rekeyed })
     }
 
     pub fn get_keys(&self, _req: GetKeys) -> Result<GetKeysResponse> {

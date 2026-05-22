@@ -13,6 +13,7 @@ use chia_wallet_sdk::{
         puzzle_types::{DeriveSynthetic, standard::StandardArgs},
     },
     prelude::*,
+    puzzles::SETTLEMENT_PAYMENT_HASH,
     test::PeerSimulator,
     types::puzzles::P2DelegatedConditionsArgs,
 };
@@ -21,8 +22,9 @@ use rand_chacha::ChaCha8Rng;
 use rustls::crypto::aws_lc_rs::default_provider;
 use sage::Sage;
 use sage_api::{
-    Amount, GetCats, GetKey, GetNfts, GetPeers, GetSyncStatus, GetVersion, ImportKey, Login,
-    NftSortMode, RequiredSignatures, SendCat, SendXch, TransferNfts,
+    Amount, CoinSpendJson, GetCats, GetKey, GetNfts, GetOffers, GetPeers, GetSecretKey,
+    GetSyncStatus, GetVersion, ImportKey, Login, MakeOffer, MakeOfferUnsigned, NftSortMode,
+    OfferAmount, RekeyKeychain, RequiredSignatures, SendCat, SendXch, TransferNfts, UnlockKeychain,
 };
 use sage_api_macro::impl_endpoints;
 use sage_wallet::{SyncCommand, SyncEvent};
@@ -579,3 +581,341 @@ async fn test_tangem_mainnet_live() -> Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Tangem unsigned-build verification (simulator, no network)
+//
+//   SQLX_OFFLINE=true cargo test -p sage-rpc tangem_unsigned -- --nocapture
+//
+// Proves the observer wallet (ONLY the card's public key) can build spend
+// bundles that actually RUN through the CLVM, so the Tangem card just adds the
+// signature afterwards. Uses the simulator's funded arbor coin — no network.
+// ---------------------------------------------------------------------------
+
+/// Polls sync status until the selectable XCH balance reaches `expected`,
+/// draining sync events so the bounded channel never stalls the sync manager.
+async fn wait_balance(app: &mut TestApp, expected: u64) -> Result<()> {
+    for _ in 0..50 {
+        app.drain_events();
+        if app
+            .get_sync_status(GetSyncStatus {})
+            .await?
+            .selectable_balance
+            .to_u64()
+            == Some(expected)
+        {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    bail!("balance did not reach {expected} mojos");
+}
+
+/// Runs a single coin spend through the CLVM and returns its output conditions
+/// (this is the "run" check). Errors propagate so callers can detect a coin
+/// spend that does not even execute.
+fn run_coin_spend(
+    allocator: &mut Allocator,
+    cs: &CoinSpendJson,
+) -> Result<Vec<Condition<NodePtr>>> {
+    let puzzle: Program = hex::decode(cs.puzzle_reveal.trim_start_matches("0x"))?.into();
+    let solution: Program = hex::decode(cs.solution.trim_start_matches("0x"))?.into();
+    let puzzle = puzzle
+        .to_clvm(allocator)
+        .map_err(|e| anyhow::anyhow!("to_clvm puzzle: {e}"))?;
+    let solution = solution
+        .to_clvm(allocator)
+        .map_err(|e| anyhow::anyhow!("to_clvm solution: {e}"))?;
+    let output = run_puzzle(allocator, puzzle, solution)
+        .map_err(|e| anyhow::anyhow!("run_puzzle: {e}"))?;
+    Vec::<Condition<NodePtr>>::from_clvm(allocator, output)
+        .map_err(|e| anyhow::anyhow!("from_clvm conditions: {e}"))
+}
+
+/// Build an UNSIGNED self-send from the funded arbor coin, then RUN every coin
+/// spend and check the CREATE_COIN outputs add up. The wallet only knows the
+/// card's public key, so every required signature must be the card key.
+#[tokio::test]
+async fn test_tangem_unsigned_send_runs() -> Result<()> {
+    let mut app = TestApp::new().await?;
+    let (_fp, _card_pk, arbor_ph) = app.setup_tangem(1000).await?;
+
+    wait_balance(&mut app, 1000).await?;
+
+    let address = app.get_sync_status(GetSyncStatus {}).await?.receive_address;
+
+    // amount + change = 1000, both back to the arbor address (self-send).
+    let tx = app
+        .send_xch(SendXch {
+            address: address.clone(),
+            amount: Amount::u64(600),
+            fee: Amount::u64(0),
+            memos: vec![],
+            clawback: None,
+            auto_submit: false,
+        })
+        .await?;
+    assert!(!tx.coin_spends.is_empty(), "must build coin spends");
+
+    // Only the card key can be required (observer wallet has no other keys).
+    let req = app
+        .required_signatures(RequiredSignatures {
+            coin_spends: tx.coin_spends.clone(),
+        })
+        .await?;
+    assert!(
+        !req.signatures.is_empty(),
+        "an unsigned tx must require the card signature"
+    );
+    for s in &req.signatures {
+        assert_eq!(s.public_key, TANGEM_PUBLIC_KEY_HEX);
+    }
+
+    // RUN every coin spend; collect CREATE_COIN outputs.
+    let mut allocator = Allocator::new();
+    let mut outputs: Vec<(Bytes32, u64)> = Vec::new();
+    for (i, cs) in tx.coin_spends.iter().enumerate() {
+        let conditions = run_coin_spend(&mut allocator, cs)
+            .unwrap_or_else(|e| panic!("coin spend {i} failed to run: {e}"));
+        for c in conditions {
+            if let Condition::CreateCoin(cc) = c {
+                println!(
+                    "  out coin: ph=0x{} amount={}",
+                    hex::encode(cc.puzzle_hash),
+                    cc.amount
+                );
+                outputs.push((cc.puzzle_hash, cc.amount));
+            }
+        }
+    }
+
+    let total: u64 = outputs.iter().map(|(_, a)| *a).sum();
+    assert_eq!(total, 1000, "recipient + change must equal the spent coin");
+    assert!(
+        outputs.iter().any(|(ph, a)| *ph == arbor_ph && *a == 600),
+        "recipient output (600) present"
+    );
+    assert!(
+        outputs.iter().any(|(ph, a)| *ph == arbor_ph && *a == 400),
+        "change output (400) present"
+    );
+    println!(
+        "UNSIGNED SEND ok: {} coin spend(s), outputs sum {}",
+        tx.coin_spends.len(),
+        total
+    );
+    Ok(())
+}
+
+/// Build an offer with ONLY the card's public key via `make_offer_unsigned`.
+/// The offer is structurally valid but, like every offer, NOT a submittable
+/// standalone bundle: validating coin spend by coin spend, at least one is
+/// unsatisfiable (it locks the offered coin into the settlement puzzle and
+/// requires both the card signature and the absent taker's side). We confirm
+/// the offered asset is sent to SETTLEMENT_PAYMENT_HASH and the card key is
+/// required.
+#[tokio::test]
+async fn test_tangem_unsigned_offer_per_spend() -> Result<()> {
+    let mut app = TestApp::new().await?;
+    let (_fp, _card_pk, _arbor_ph) = app.setup_tangem(1000).await?;
+
+    wait_balance(&mut app, 1000).await?;
+
+    // Offer 500 mojos XCH, request 1000 mojos XCH (asset_id None == XCH).
+    let offer = app
+        .make_offer_unsigned(MakeOfferUnsigned {
+            offered_assets: vec![OfferAmount {
+                asset_id: None,
+                hidden_puzzle_hash: None,
+                amount: Amount::u64(500),
+            }],
+            requested_assets: vec![OfferAmount {
+                asset_id: None,
+                hidden_puzzle_hash: None,
+                amount: Amount::u64(1000),
+            }],
+            fee: Amount::u64(0),
+            receive_address: None,
+            expires_at_second: None,
+            coin_ids: None,
+        })
+        .await?;
+    assert!(!offer.coin_spends.is_empty(), "offer must build coin spends");
+
+    let req = app
+        .required_signatures(RequiredSignatures {
+            coin_spends: offer.coin_spends.clone(),
+        })
+        .await?;
+    assert!(
+        !req.signatures.is_empty(),
+        "an unsigned offer must require the card signature"
+    );
+    for s in &req.signatures {
+        assert_eq!(s.public_key, TANGEM_PUBLIC_KEY_HEX);
+    }
+
+    // Validate coin spend by coin spend.
+    let settle: Bytes32 = SETTLEMENT_PAYMENT_HASH.into();
+    let mut allocator = Allocator::new();
+    let mut run_failures = 0usize;
+    let mut settlement_outputs = 0usize;
+    let mut aggsig_conditions = 0usize;
+    let mut announcement_assertions = 0usize;
+    for (i, cs) in offer.coin_spends.iter().enumerate() {
+        match run_coin_spend(&mut allocator, cs) {
+            Err(e) => {
+                run_failures += 1;
+                println!("  spend[{i}] RUN FAILED (expected for an offer): {e}");
+            }
+            Ok(conds) => {
+                let mut to_settle = 0usize;
+                for c in &conds {
+                    match c {
+                        Condition::CreateCoin(cc) if cc.puzzle_hash == settle => {
+                            to_settle += 1;
+                            settlement_outputs += 1;
+                        }
+                        Condition::AggSigMe(_) | Condition::AggSigUnsafe(_) => {
+                            aggsig_conditions += 1
+                        }
+                        Condition::AssertPuzzleAnnouncement(_)
+                        | Condition::AssertCoinAnnouncement(_) => announcement_assertions += 1,
+                        _ => {}
+                    }
+                }
+                println!(
+                    "  spend[{i}] ran: {} condition(s), {} to settlement",
+                    conds.len(),
+                    to_settle
+                );
+            }
+        }
+    }
+
+    println!(
+        "OFFER built: {} coin spend(s); run_failures={run_failures}, \
+         settlement_outputs={settlement_outputs}, aggsig={aggsig_conditions}, \
+         announcement_assertions={announcement_assertions}",
+        offer.coin_spends.len()
+    );
+
+    // The offered asset must be locked into the settlement puzzle.
+    assert!(
+        settlement_outputs >= 1,
+        "offer must send the offered asset to SETTLEMENT_PAYMENT_HASH"
+    );
+    // And the offer is provably not a submittable standalone bundle: it needs
+    // the card signature and/or the absent taker's announcements (or a coin
+    // spend that cannot run in isolation). At least one such failure exists.
+    assert!(
+        run_failures + aggsig_conditions + announcement_assertions >= 1,
+        "an offer cannot be a complete, submittable bundle on its own"
+    );
+    Ok(())
+}
+
+/// Validates the `get_offers` contract the Dart offer-listing migration
+/// (`SageOffers.list`/`count`/`byOfferId`) depends on: make an offer with
+/// `auto_import`, then list the store and confirm the record carries the
+/// fields the mapper reads — offer string, offer_id, status and a
+/// maker/taker summary.
+#[tokio::test]
+async fn test_get_offers_lists_made_offer() -> Result<()> {
+    let mut app = TestApp::new().await?;
+    let _alice = app.setup_bls(10_000_000_000_000).await?; // 10 XCH
+    wait_balance(&mut app, 10_000_000_000_000).await?;
+
+    let made = app
+        .make_offer(MakeOffer {
+            offered_assets: vec![OfferAmount {
+                asset_id: None,
+                hidden_puzzle_hash: None,
+                amount: Amount::u64(1_000_000_000_000),
+            }],
+            requested_assets: vec![OfferAmount {
+                asset_id: None,
+                hidden_puzzle_hash: None,
+                amount: Amount::u64(2_000_000_000_000),
+            }],
+            fee: Amount::u64(0),
+            receive_address: None,
+            expires_at_second: None,
+            auto_import: true,
+            coin_ids: None,
+        })
+        .await?;
+    println!("made offer id={}", made.offer_id);
+
+    let offers = app.get_offers(GetOffers {}).await?.offers;
+    println!("get_offers returned {} record(s)", offers.len());
+    assert!(!offers.is_empty(), "get_offers must return the imported offer");
+
+    let rec = offers
+        .iter()
+        .find(|o| o.offer_id == made.offer_id)
+        .expect("the made offer must be in the store");
+    println!(
+        "  status={:?} maker_assets={} taker_assets={} ts={}",
+        rec.status,
+        rec.summary.maker.len(),
+        rec.summary.taker.len(),
+        rec.creation_timestamp,
+    );
+    assert!(!rec.offer.is_empty(), "offer string present");
+    assert!(!rec.summary.maker.is_empty(), "maker side (offered) present");
+    assert!(!rec.summary.taker.is_empty(), "taker side (requested) present");
+    Ok(())
+}
+
+
+/// Security regression: keychain secrets must be protected by the session
+/// passphrase set via `unlock_keychain` / `rekey_keychain`. After re-keying
+/// away from the empty (legacy) passphrase, the secrets must NOT be
+/// extractable with the empty passphrase any more. See
+/// SAGE_KEYCHAIN_SECURITY_PLAN.md.
+#[tokio::test]
+async fn test_keychain_passphrase_protects_secrets() -> Result<()> {
+    let mut app = TestApp::new().await?;
+    let fingerprint = app.setup_bls(0).await?;
+
+    // Imported under the default empty passphrase (legacy behaviour): the
+    // secret decrypts with no passphrase.
+    let res = app.get_secret_key(GetSecretKey { fingerprint }).await?;
+    assert!(res.secrets.is_some(), "secret readable under empty passphrase");
+
+    // Re-key from empty -> a real passphrase.
+    let new_pw = hex::encode(b"a-strong-derived-passphrase");
+    let rekeyed = app
+        .rekey_keychain(RekeyKeychain {
+            old_password: String::new(),
+            new_password: new_pw.clone(),
+        })
+        .await?;
+    assert_eq!(rekeyed.rekeyed, 1, "exactly one secret re-encrypted");
+
+    // In-memory passphrase is now the new one: the secret still decrypts.
+    let res = app.get_secret_key(GetSecretKey { fingerprint }).await?;
+    assert!(res.secrets.is_some(), "secret readable under new passphrase");
+
+    // Simulate a fresh session that wrongly assumes no passphrase: extraction
+    // must fail (the on-disk secret is no longer plaintext-equivalent).
+    app.sage.lock().await.keychain_password = Vec::new();
+    let err = app
+        .get_secret_key(GetSecretKey { fingerprint })
+        .await
+        .err();
+    assert!(
+        err.is_some(),
+        "empty passphrase must NOT decrypt a re-keyed secret"
+    );
+
+    // Re-unlock with the correct passphrase and confirm it works again.
+    app.unlock_keychain(UnlockKeychain {
+        password: new_pw,
+    })
+    .await?;
+    let res = app.get_secret_key(GetSecretKey { fingerprint }).await?;
+    assert!(res.secrets.is_some(), "secret readable after re-unlock");
+
+    Ok(())
+}

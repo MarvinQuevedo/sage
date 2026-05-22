@@ -6,11 +6,12 @@ use chia_wallet_sdk::{
 use itertools::Itertools;
 use sage_api::{
     Amount, CancelOffer, CancelOfferResponse, CancelOffers, CancelOffersResponse, CombineOffers,
-    CombineOffersResponse, DeleteOffer, DeleteOfferResponse, GetOffer, GetOfferResponse, GetOffers,
-    GetOffersForAsset, GetOffersForAssetResponse, GetOffersResponse, ImportOffer,
-    ImportOfferResponse, MakeOffer, MakeOfferResponse, NftRoyalty, OfferAmount, OfferAsset,
-    OfferRecord, OfferRecordStatus, OfferSummary, OptionAssets, TakeOffer, TakeOfferResponse,
-    ViewOffer, ViewOfferResponse,
+    CombineOffersResponse, DeleteOffer, DeleteOfferResponse, EncodeOffer, EncodeOfferResponse,
+    GetOffer, GetOfferResponse, GetOffers, GetOffersForAsset, GetOffersForAssetResponse,
+    GetOffersResponse, ImportOffer, ImportOfferResponse, MakeOffer, MakeOfferResponse,
+    MakeOfferUnsigned, MakeOfferUnsignedResponse, NftRoyalty, OfferAmount, OfferAsset, OfferRecord,
+    OfferRecordStatus, OfferSummary, OptionAssets, TakeOffer, TakeOfferResponse, TakeOfferUnsigned,
+    TakeOfferUnsignedResponse, ViewOffer, ViewOfferResponse,
 };
 use sage_assets::fetch_uris_with_hash;
 use sage_database::{AssetKind, OfferRow, OfferStatus, OfferedAsset};
@@ -24,8 +25,8 @@ use tracing::debug;
 
 use crate::{
     ConfirmationInfo, Error, ExtractedNftData, Result, Sage, extract_nft_data, json_bundle,
-    offer_expiration, parse_amount, parse_asset_id, parse_coin_ids, parse_hash, parse_nft_id,
-    parse_offer_id, parse_option_id,
+    json_spend, offer_expiration, parse_amount, parse_asset_id, parse_coin_ids, parse_hash,
+    parse_nft_id, parse_offer_id, parse_option_id, parse_signature, rust_spend,
 };
 
 #[derive(Debug, Clone)]
@@ -38,15 +39,25 @@ struct AssetToOffer {
 }
 
 impl Sage {
-    pub async fn make_offer(&self, req: MakeOffer) -> Result<MakeOfferResponse> {
+    /// Build the unsigned offer spend bundle shared by [`Self::make_offer`]
+    /// (which signs it in-process) and [`Self::make_offer_unsigned`] (which
+    /// hands the coin spends to an external signer such as a Tangem card).
+    async fn build_offer_unsigned(
+        &self,
+        requested_assets: Vec<OfferAmount>,
+        offered_assets: Vec<OfferAmount>,
+        fee: Amount,
+        receive_address: Option<String>,
+        expires_at_second: Option<u64>,
+        coin_ids: Option<Vec<String>>,
+    ) -> Result<SpendBundle> {
         let wallet = self.wallet()?;
 
-        let selected_coin_ids = parse_coin_ids(req.coin_ids.unwrap_or_default())?;
+        let selected_coin_ids = parse_coin_ids(coin_ids.unwrap_or_default())?;
 
         let mut offered = Offered {
-            fee: parse_amount(req.fee)?,
-            p2_puzzle_hash: req
-                .receive_address
+            fee: parse_amount(fee)?,
+            p2_puzzle_hash: receive_address
                 .map(|address| self.parse_address(address))
                 .transpose()?,
             selected_coin_ids,
@@ -57,7 +68,7 @@ impl Sage {
             asset_id,
             amount: raw_amount,
             hidden_puzzle_hash: _, // We ignore this since we already have it
-        } in req.offered_assets
+        } in offered_assets
         {
             let amount = parse_amount(raw_amount.clone())?;
 
@@ -102,7 +113,7 @@ impl Sage {
             asset_id,
             hidden_puzzle_hash,
             amount: raw_amount,
-        } in req.requested_assets
+        } in requested_assets
         {
             let amount = parse_amount(raw_amount.clone())?;
 
@@ -163,11 +174,29 @@ impl Sage {
         }
 
         let unsigned = wallet
-            .make_offer(offered, requested, req.expires_at_second)
+            .make_offer(offered, requested, expires_at_second)
             .await?;
 
+        Ok(unsigned)
+    }
+
+    pub async fn make_offer(&self, req: MakeOffer) -> Result<MakeOfferResponse> {
+        let unsigned = self
+            .build_offer_unsigned(
+                req.requested_assets,
+                req.offered_assets,
+                req.fee,
+                req.receive_address,
+                req.expires_at_second,
+                req.coin_ids,
+            )
+            .await?;
+
+        let wallet = self.wallet()?;
+
         let (_mnemonic, Some(master_sk)) =
-            self.keychain.extract_secrets(wallet.fingerprint, b"")?
+            self.keychain
+                .extract_secrets(wallet.fingerprint, &self.keychain_password)?
         else {
             return Err(Error::NoSigningKey);
         };
@@ -196,6 +225,59 @@ impl Sage {
         })
     }
 
+    /// Build a new offer's coin spends without signing them, for external
+    /// signers (e.g. Tangem). The caller signs the messages from
+    /// `required_signatures` and assembles the offer with [`Self::encode_offer`].
+    pub async fn make_offer_unsigned(
+        &self,
+        req: MakeOfferUnsigned,
+    ) -> Result<MakeOfferUnsignedResponse> {
+        let unsigned = self
+            .build_offer_unsigned(
+                req.requested_assets,
+                req.offered_assets,
+                req.fee,
+                req.receive_address,
+                req.expires_at_second,
+                req.coin_ids,
+            )
+            .await?;
+
+        Ok(MakeOfferUnsignedResponse {
+            coin_spends: unsigned.coin_spends.iter().map(json_spend).collect(),
+        })
+    }
+
+    /// Aggregate externally produced signatures into an offer's coin spends and
+    /// encode the finished offer. Counterpart to [`Self::make_offer_unsigned`].
+    pub async fn encode_offer(&self, req: EncodeOffer) -> Result<EncodeOfferResponse> {
+        let coin_spends = req
+            .coin_spends
+            .into_iter()
+            .map(rust_spend)
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut aggregated_signature = Signature::default();
+        for signature in req.signatures {
+            aggregated_signature += &parse_signature(signature)?;
+        }
+
+        let spend_bundle = SpendBundle::new(coin_spends, aggregated_signature);
+        let encoded_offer = encode_offer(&spend_bundle)?;
+
+        if req.auto_import {
+            self.import_offer(ImportOffer {
+                offer: encoded_offer.clone(),
+            })
+            .await?;
+        }
+
+        Ok(EncodeOfferResponse {
+            offer: encoded_offer,
+            offer_id: hex::encode(sort_offer(spend_bundle).name()),
+        })
+    }
+
     pub async fn take_offer(&self, req: TakeOffer) -> Result<TakeOfferResponse> {
         let wallet = self.wallet()?;
 
@@ -205,7 +287,8 @@ impl Sage {
         let unsigned = wallet.take_offer(offer, fee).await?;
 
         let (_mnemonic, Some(master_sk)) =
-            self.keychain.extract_secrets(wallet.fingerprint, b"")?
+            self.keychain
+                .extract_secrets(wallet.fingerprint, &self.keychain_password)?
         else {
             return Err(Error::NoSigningKey);
         };
@@ -258,6 +341,25 @@ impl Sage {
                 .await?,
             spend_bundle: json_bundle,
             transaction_id,
+        })
+    }
+
+    /// Build the taker coin spends for an offer without signing them, for
+    /// external signers (e.g. Tangem). The caller signs the messages from
+    /// `required_signatures` and broadcasts via `submit_with_signatures`.
+    pub async fn take_offer_unsigned(
+        &self,
+        req: TakeOfferUnsigned,
+    ) -> Result<TakeOfferUnsignedResponse> {
+        let wallet = self.wallet()?;
+
+        let offer = decode_offer(&req.offer)?;
+        let fee = parse_amount(req.fee)?;
+
+        let unsigned = wallet.take_offer(offer, fee).await?;
+
+        Ok(TakeOfferUnsignedResponse {
+            coin_spends: unsigned.coin_spends.iter().map(json_spend).collect(),
         })
     }
 

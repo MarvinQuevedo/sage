@@ -178,7 +178,8 @@ impl Sage {
         };
 
         let (_mnemonic, Some(master_sk)) =
-            self.keychain.extract_secrets(wallet.fingerprint, b"")?
+            self.keychain
+                .extract_secrets(wallet.fingerprint, &self.keychain_password)?
         else {
             return Err(Error::NoSigningKey);
         };
@@ -217,7 +218,8 @@ impl Sage {
         };
 
         let (_mnemonic, Some(master_sk)) =
-            self.keychain.extract_secrets(wallet.fingerprint, b"")?
+            self.keychain
+                .extract_secrets(wallet.fingerprint, &self.keychain_password)?
         else {
             return Err(Error::NoSigningKey);
         };

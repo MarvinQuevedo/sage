@@ -406,6 +406,66 @@ pub struct GetSecretKeyResponse {
     pub secrets: Option<SecretKeyInfo>,
 }
 
+/// Set the in-memory passphrase used to encrypt/decrypt keychain secrets
+#[cfg_attr(
+    feature = "openapi",
+    crate::openapi_attr(
+        tag = "Authentication & Keys",
+        description = "Set the in-memory passphrase used to encrypt and decrypt keychain secrets at rest. Call once after login, before any signing operation. The passphrase is never persisted; it must be supplied again every session. Pass a hex-encoded byte string (empty string = no passphrase, legacy behaviour)."
+    )
+)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UnlockKeychain {
+    /// Hex-encoded passphrase bytes. Empty string means no passphrase.
+    #[serde(default)]
+    pub password: String,
+}
+
+/// Response for unlocking the keychain
+#[cfg_attr(
+    feature = "openapi",
+    crate::openapi_attr(tag = "Authentication & Keys")
+)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UnlockKeychainResponse {}
+
+/// Re-encrypt every stored secret under a new passphrase
+#[cfg_attr(
+    feature = "openapi",
+    crate::openapi_attr(
+        tag = "Authentication & Keys",
+        description = "Re-encrypt every stored secret in the keychain from `old_password` to `new_password` (both hex-encoded byte strings). Used to migrate a keychain that was written with no passphrase, or when the user changes their PIN. Also updates the in-memory passphrase to `new_password` on success."
+    )
+)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RekeyKeychain {
+    /// Current hex-encoded passphrase the secrets are encrypted under.
+    #[serde(default)]
+    pub old_password: String,
+    /// New hex-encoded passphrase to re-encrypt the secrets under.
+    #[serde(default)]
+    pub new_password: String,
+}
+
+/// Response for re-keying the keychain
+#[cfg_attr(
+    feature = "openapi",
+    crate::openapi_attr(tag = "Authentication & Keys")
+)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RekeyKeychainResponse {
+    /// Number of secret keys that were re-encrypted.
+    pub rekeyed: u32,
+}
+
 /// List all custom theme NFTs
 #[cfg_attr(
     feature = "openapi",
