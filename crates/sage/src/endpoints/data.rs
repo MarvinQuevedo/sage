@@ -1,6 +1,6 @@
 use crate::{
     Error, Result, Sage, address_kind, parse_any_asset_id, parse_asset_id, parse_collection_id,
-    parse_did_id, parse_nft_id, parse_option_id,
+    parse_did_id, parse_hash, parse_nft_id, parse_option_id,
 };
 use base64::{Engine, prelude::BASE64_STANDARD};
 use chia_wallet_sdk::chia::puzzle_types::nft::NftMetadata;
@@ -16,10 +16,11 @@ use sage_api::{
     GetNftCollections, GetNftCollectionsResponse, GetNftData, GetNftDataResponse, GetNftIcon,
     GetNftIconResponse, GetNftResponse, GetNftThumbnail, GetNftThumbnailResponse, GetNfts,
     GetNftsResponse, GetOption, GetOptionResponse, GetOptions, GetOptionsResponse,
-    GetPendingTransactions, GetPendingTransactionsResponse, GetSpendableCoinCount,
-    GetSpendableCoinCountResponse, GetSyncStatus, GetSyncStatusResponse, GetToken,
-    GetTokenResponse, GetTransaction, GetTransactionResponse, GetTransactions,
-    GetTransactionsResponse, GetVersion, GetVersionResponse, IsAssetOwned, IsAssetOwnedResponse,
+    GetPendingTransactions, GetPendingTransactionsResponse, GetPremiumNfts,
+    GetPremiumNftsResponse, GetSpendableCoinCount, GetSpendableCoinCountResponse, GetSyncStatus,
+    GetSyncStatusResponse, GetToken, GetTokenResponse, GetTransaction, GetTransactionResponse,
+    GetTransactions, GetTransactionsResponse, GetVersion, GetVersionResponse, IsAssetOwned,
+    IsAssetOwnedResponse, PremiumNftMatch,
     NftCollectionRecord, NftData, NftRecord, NftSortMode as ApiNftSortMode, NftSpecialUseType,
     OptionRecord, OptionSortMode as ApiOptionSortMode, PendingTransactionRecord,
     PerformDatabaseMaintenance, PerformDatabaseMaintenanceResponse, TokenRecord,
@@ -677,6 +678,86 @@ impl Sage {
             nfts: records,
             total,
         })
+    }
+
+    /// Probe each listed wallet's local DB for an owned NFT minted by
+    /// any DID in `minter_did_hashes`, without switching the active
+    /// session. Used to detect entitlement NFTs across multiple imported
+    /// seeds in a single round trip — the legacy unified sqflite DB
+    /// exposed every wallet's NFTs in one query, but under Sage each
+    /// fingerprint has its own store, so we open them in turn
+    /// (read-only-by-intent, the pool is dropped immediately after the
+    /// probe) and skip wallets whose DB file does not yet exist.
+    ///
+    /// Returns one [`PremiumNftMatch`] per matching (wallet, minter)
+    /// pair: at most one per minter per wallet, so the caller can tell
+    /// which entitlement DID(s) a wallet satisfies without dragging the
+    /// full NFT inventory across the FFI boundary.
+    pub async fn get_premium_nfts(
+        &self,
+        req: GetPremiumNfts,
+    ) -> Result<GetPremiumNftsResponse> {
+        if req.minter_did_hashes.is_empty() {
+            return Ok(GetPremiumNftsResponse {
+                matches: Vec::new(),
+            });
+        }
+
+        // Parse every DID up-front so a bad hex string fails fast (before
+        // we open any DB) and the per-wallet loop stays simple.
+        let parsed: Vec<(String, Vec<u8>)> = req
+            .minter_did_hashes
+            .into_iter()
+            .map(|raw| {
+                let hash = parse_hash(raw.clone())?;
+                Ok::<_, Error>((hex::encode(hash.as_ref()), hash.as_ref().to_vec()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut matches: Vec<PremiumNftMatch> = Vec::new();
+        for fingerprint in req.fingerprints {
+            // Skip wallets that have never been synced — no DB file means
+            // no NFTs to find, and `connect_to_database` would otherwise
+            // create an empty file as a side effect.
+            let db_path = match self.wallet_db_path(fingerprint) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            if !db_path.exists() {
+                continue;
+            }
+
+            let pool = match self.connect_to_database(fingerprint).await {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            // One LIMIT-1 probe per minter DID. Cheap: SQLite stops at the
+            // first matching row (there's an index on `nfts.minter_hash`),
+            // and we typically pass 1-3 DIDs total.
+            for (minter_hex, minter_bytes) in &parsed {
+                let row = sqlx::query_as::<_, (Vec<u8>,)>(
+                    "SELECT asset_hash FROM owned_nfts \
+                     WHERE minter_hash = ? LIMIT 1",
+                )
+                .bind(minter_bytes)
+                .fetch_optional(&pool)
+                .await;
+
+                if let Ok(Some((asset_hash,))) = row {
+                    matches.push(PremiumNftMatch {
+                        fingerprint,
+                        minter_did_hash: minter_hex.clone(),
+                        launcher_id: hex::encode(asset_hash),
+                    });
+                }
+            }
+
+            // Drop the pool so the connection is closed before we move on.
+            drop(pool);
+        }
+
+        Ok(GetPremiumNftsResponse { matches })
     }
 
     pub async fn get_nft(&self, req: GetNft) -> Result<GetNftResponse> {

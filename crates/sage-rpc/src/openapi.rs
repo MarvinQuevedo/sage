@@ -113,6 +113,7 @@ pub fn generate_openapi() -> OpenApi {
         .schema_from::<sage_api::FeeAction>()
         .schema_from::<sage_api::NewNftUri>()
         .schema_from::<sage_api::NftTransfer>()
+        .schema_from::<sage_api::PremiumNftMatch>()
         // WalletConnect helper types (referenced by the 5 tauri endpoints).
         // Full path: not glob-re-exported to avoid colliding with the
         // similarly-named offers/transactions helper types.

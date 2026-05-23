@@ -916,3 +916,53 @@ pub struct IsAssetOwnedResponse {
     #[cfg_attr(feature = "openapi", schema(example = true))]
     pub owned: bool,
 }
+
+/// Probe multiple wallets for an NFT minted by any of a list of DIDs,
+/// without switching the active session. Each fingerprint's local
+/// SQLite DB is opened directly; the active wallet stays as-is and
+/// sync is undisturbed. Used to detect "premium" entitlement NFTs
+/// across imported seeds in a single round trip — pass every minter
+/// DID that grants the entitlement so a single call covers them all.
+#[cfg_attr(
+    feature = "openapi",
+    crate::openapi_attr(
+        tag = "NFTs",
+        description = "Check each listed wallet for an NFT whose minter DID matches any of `minter_did_hashes`, without switching the active session. Returns one entry per matching (wallet, minter) pair."
+    )
+)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct GetPremiumNfts {
+    /// Wallet fingerprints to probe. Missing/never-synced wallets are skipped.
+    pub fingerprints: Vec<u32>,
+    /// Minter DID puzzlehashes, hex-encoded (32 bytes each, optional `0x`
+    /// prefix). A wallet matches if it owns at least one NFT whose minter
+    /// hash is in this list. Empty list returns no matches.
+    pub minter_did_hashes: Vec<String>,
+}
+
+/// Response with one entry per (wallet, minter) pair that owns at least
+/// one matching premium NFT.
+#[cfg_attr(feature = "openapi", crate::openapi_attr(tag = "NFTs"))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct GetPremiumNftsResponse {
+    /// Matching (wallet, minter) pairs.
+    pub matches: Vec<PremiumNftMatch>,
+}
+
+/// A single premium NFT hit: the wallet that holds it, the minter DID
+/// that granted the entitlement, and the NFT's launcher hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tauri", derive(specta::Type))]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PremiumNftMatch {
+    /// Wallet fingerprint that owns the NFT.
+    pub fingerprint: u32,
+    /// Minter DID puzzlehash that matched, hex-encoded (no prefix).
+    pub minter_did_hash: String,
+    /// NFT launcher / asset hash, hex-encoded (no prefix).
+    pub launcher_id: String,
+}

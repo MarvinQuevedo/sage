@@ -36,6 +36,7 @@
   "get_nft_collections": true,
   "get_nft_collection": true,
   "get_nfts": true,
+  "get_premium_nfts": true,
   "get_nft": true,
   "get_nft_icon": true,
   "get_nft_thumbnail": true,
