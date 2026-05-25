@@ -5931,6 +5931,7 @@ dependencies = [
  "chia_streamable_macro 0.36.1",
  "futures-lite",
  "futures-util",
+ "getrandom 0.3.4",
  "hex",
  "hex-literal",
  "indexmap 2.12.1",

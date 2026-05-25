@@ -89,7 +89,13 @@ tauri-specta = "2.0.0-rc.21"
 utoipa = "5.2.0"
 
 # Chia
-chia-wallet-sdk = { version = "0.33.0", features = ["rustls", "offer-compression", "peer-simulator"] }
+# Note: `rustls` and `peer-simulator` features are intentionally NOT enabled at
+# the workspace level. They're requested locally by crates that need them
+# (sage requests `rustls` for its native peer client; sage-rpc requests
+# `peer-simulator` for tests). Keeping them off here is what lets sage-wallet
+# build for `wasm32-unknown-unknown` — the `rustls` feature pulls in
+# aws-lc-sys which is not WASM-compatible.
+chia-wallet-sdk = { version = "0.33.0", features = ["offer-compression"] }
 chia_streamable_macro = "0.36.1"
 chia-traits = "0.36.1"
 chia-sha2 = "0.36.1"

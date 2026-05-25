@@ -36,10 +36,30 @@ tokio = { workspace = true, features = ["time"] }
 itertools = { workspace = true }
 futures-util = { workspace = true }
 futures-lite = { workspace = true }
-reqwest = { workspace = true, default-features = false, features = ["http2", "rustls-tls-webpki-roots", "json"] }
+# On native, reqwest uses rustls (which pulls aws-lc-rs + mio + tokio-net).
+# On wasm32 we strip TLS — the browser's fetch() handles HTTPS, and we don't
+# want mio/tokio-net (incompatible with wasm32-unknown-unknown).
 indexmap = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
+
+# ─── Native-only deps ──────────────────────────────────────────────────────
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Full reqwest with rustls — keeps the existing native behavior (peer P2P
+# auxiliary HTTP + TLS-fronted Chia full-node RPC).
+reqwest = { workspace = true, default-features = false, features = ["http2", "rustls-tls-webpki-roots", "json"] }
+
+# ─── wasm32 deps ───────────────────────────────────────────────────────────
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Bare reqwest on wasm32: no rustls, no http2, no native TLS. Reqwest's
+# wasm32 backend goes through the browser's `fetch()` automatically, and
+# the browser is the one doing TLS.
+reqwest = { workspace = true, default-features = false, features = ["json"] }
+# getrandom 0.3 needs both the `wasm_js` feature AND a matching `--cfg
+# getrandom_backend="wasm_js"` rustflag (set in `.cargo/config.toml` at
+# the worktree root). This routes randomness through the browser's
+# `crypto.getRandomValues()` (available in browsers and Node.js).
+getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 anyhow = { workspace = true }
