@@ -14,6 +14,14 @@ categories = { workspace = true }
 [lints]
 workspace = true
 
+[features]
+default = []
+# Enables HTTP-based sync against a Chia full-node RPC provider (api.coinset.org
+# by default). Used by the browser-extension target where peer P2P TLS is not
+# available. Native targets (desktop / mobile) keep the default empty feature
+# set and continue using peer-based sync.
+coinset-sync = []
+
 [dependencies]
 chia-wallet-sdk = { workspace = true }
 chia_streamable_macro = { workspace = true }

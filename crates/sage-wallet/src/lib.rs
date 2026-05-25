@@ -4,6 +4,7 @@ mod database;
 mod error;
 mod puzzle_context;
 mod queues;
+pub mod sync_backend;
 mod sync_manager;
 mod transaction;
 mod utils;
@@ -16,6 +17,9 @@ pub use database::*;
 pub use error::*;
 pub use puzzle_context::*;
 pub use queues::*;
+pub use sync_backend::{SyncBackend, peer::PeerBackend};
+#[cfg(feature = "coinset-sync")]
+pub use sync_backend::coinset::CoinsetBackend;
 pub use sync_manager::*;
 pub use transaction::*;
 pub use utils::*;
