@@ -95,7 +95,7 @@ utoipa = "5.2.0"
 # `peer-simulator` for tests). Keeping them off here is what lets sage-wallet
 # build for `wasm32-unknown-unknown` — the `rustls` feature pulls in
 # aws-lc-sys which is not WASM-compatible.
-chia-wallet-sdk = { version = "0.33.0", features = ["offer-compression"] }
+chia-wallet-sdk = { version = "0.33.0", default-features = false, features = ["offer-compression"] }
 chia_streamable_macro = "0.36.1"
 chia-traits = "0.36.1"
 chia-sha2 = "0.36.1"
@@ -150,3 +150,17 @@ clap = "4.5.21"
 # Testing
 tempfile = "3.25.0"
 tower = "0.5.3"
+
+# Override chia-wallet-sdk with our local fork. The fork makes chia-sdk-client
+# (and friends) optional behind a `peer-client` feature, which is what lets
+# sage-wallet build for wasm32-unknown-unknown without dragging in tokio-net.
+# See /Users/marvin/Projects/Ozone/sage-web/vendor/chia-wallet-sdk/.
+[patch.crates-io]
+chia-wallet-sdk = { path = "../chia-wallet-sdk" }
+chia-sdk-client = { path = "../chia-wallet-sdk/crates/chia-sdk-client" }
+chia-sdk-coinset = { path = "../chia-wallet-sdk/crates/chia-sdk-coinset" }
+chia-sdk-driver = { path = "../chia-wallet-sdk/crates/chia-sdk-driver" }
+chia-sdk-signer = { path = "../chia-wallet-sdk/crates/chia-sdk-signer" }
+chia-sdk-types = { path = "../chia-wallet-sdk/crates/chia-sdk-types" }
+chia-sdk-utils = { path = "../chia-wallet-sdk/crates/chia-sdk-utils" }
+chia-sdk-test = { path = "../chia-wallet-sdk/crates/chia-sdk-test" }

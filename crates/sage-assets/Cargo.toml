@@ -25,7 +25,13 @@ futures-util = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 mime-sniffer = { workspace = true }
-image = { workspace = true }
-webp = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 base64 = { workspace = true }
+
+# Image/webp processing for NFT thumbnails. Native only — both deps have C
+# components (libwebp-sys, image's optional decoders) that don't compile to
+# wasm32-unknown-unknown. In the browser, thumbnail generation is handled by
+# the host page (canvas / OffscreenCanvas) instead.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image = { workspace = true }
+webp = { workspace = true }

@@ -28,7 +28,7 @@ sqlx = { workspace = true, features = ["sqlite", "runtime-tokio"] }
 tokio = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 toml = { workspace = true, features = ["preserve_order"] }
-chia-wallet-sdk = { workspace = true, features = ["rustls"] }
+chia-wallet-sdk = { workspace = true, features = ["peer-client", "rustls"] }
 hex = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }

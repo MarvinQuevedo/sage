@@ -29,6 +29,7 @@ use chia_wallet_sdk::{
 
 use crate::WalletError;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod peer;
 #[cfg(feature = "coinset-sync")]
 pub mod coinset;
