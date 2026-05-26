@@ -88,9 +88,214 @@ impl SageEngine {
             "verify_signature" => self.verify_signature(params_json).await,
             "sync_tick" => self.sync_tick(params_json).await,
             "get_address_balance" => self.get_address_balance(params_json).await,
+            "scan_puzzle_hashes" => self.scan_puzzle_hashes(params_json).await,
+            "scan_hints" => self.scan_hints(params_json).await,
+            "check_coins_spent" => self.check_coins_spent(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
+    }
+
+    /// Incremental sync of a list of puzzle_hashes against coinset.org.
+    ///
+    /// JS keeps `last_synced_height` per puzzle_hash in chrome.storage.local
+    /// and passes the lowest of those (minus reorg window) as `start_height`.
+    /// The engine fetches coin records created in [start, peak] and returns
+    /// them along with the peak height to set as the new sync mark.
+    ///
+    /// Params:
+    /// `{ "puzzle_hashes": ["0x..."], "start_height": K?, "include_spent": bool?,
+    ///    "endpoint"?: "mainnet"|"testnet11"|"<url>" }`
+    ///
+    /// Returns:
+    /// `{ "peak_height": N, "coin_records": [{coin, confirmed_block_index,
+    ///    spent_block_index, spent, coinbase, timestamp, puzzle_hash, hint?}] }`
+    async fn scan_puzzle_hashes(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            puzzle_hashes: Vec<String>,
+            #[serde(default)]
+            start_height: Option<u32>,
+            #[serde(default)]
+            include_spent: Option<bool>,
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        if req.puzzle_hashes.is_empty() {
+            return Err(EngineError::InvalidParams("puzzle_hashes is empty".into()));
+        }
+        if req.puzzle_hashes.len() > 500 {
+            return Err(EngineError::InvalidParams(format!(
+                "too many puzzle_hashes ({}), max 500",
+                req.puzzle_hashes.len()
+            )));
+        }
+        let phs = req
+            .puzzle_hashes
+            .iter()
+            .map(|s| parse_bytes32(s.trim()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let client = make_client(req.endpoint.as_deref());
+
+        // Bound the result by the peak so the JS side knows where to set its
+        // next high-water mark — fetched first to avoid races against new blocks.
+        let state = client
+            .get_blockchain_state()
+            .await
+            .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+        let peak = state
+            .blockchain_state
+            .ok_or_else(|| EngineError::Internal("empty blockchain state".to_string()))?
+            .peak
+            .height;
+
+        let res = client
+            .get_coin_records_by_puzzle_hashes(
+                phs,
+                req.start_height,
+                Some(peak + 1),
+                req.include_spent,
+            )
+            .await
+            .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+
+        let records: Vec<_> = res
+            .coin_records
+            .unwrap_or_default()
+            .into_iter()
+            .map(serialize_coin_record)
+            .collect();
+
+        Ok(serde_json::json!({
+            "peak_height": peak,
+            "coin_records": records,
+        })
+        .to_string())
+    }
+
+    /// Same as `scan_puzzle_hashes` but for hint values — used to discover
+    /// inbound CATs, NFTs, DIDs that arrive at a hint we own.
+    async fn scan_hints(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            hints: Vec<String>,
+            #[serde(default)]
+            start_height: Option<u32>,
+            #[serde(default)]
+            include_spent: Option<bool>,
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        if req.hints.is_empty() {
+            return Err(EngineError::InvalidParams("hints is empty".into()));
+        }
+        if req.hints.len() > 500 {
+            return Err(EngineError::InvalidParams(format!(
+                "too many hints ({}), max 500",
+                req.hints.len()
+            )));
+        }
+        let client = make_client(req.endpoint.as_deref());
+        let state = client
+            .get_blockchain_state()
+            .await
+            .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+        let peak = state
+            .blockchain_state
+            .ok_or_else(|| EngineError::Internal("empty blockchain state".to_string()))?
+            .peak
+            .height;
+
+        // coinset has a per-hint endpoint and a multi-hint endpoint
+        // (get_coin_records_by_hints). Use the multi-hint form for batching.
+        let mut all = Vec::new();
+        for hint_str in &req.hints {
+            let hint = parse_bytes32(hint_str.trim())?;
+            let res = client
+                .get_coin_records_by_hint(
+                    hint,
+                    req.start_height,
+                    Some(peak + 1),
+                    req.include_spent,
+                )
+                .await
+                .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+            for r in res.coin_records.unwrap_or_default() {
+                let mut json = serialize_coin_record(r);
+                json["hint"] = serde_json::Value::String(hint_str.clone());
+                all.push(json);
+            }
+        }
+        Ok(serde_json::json!({
+            "peak_height": peak,
+            "coin_records": all,
+        })
+        .to_string())
+    }
+
+    /// Batch-check a list of coin ids: returns which ones have been spent
+    /// since we last looked. JS keeps an "unspent set" in storage and pumps
+    /// it through this every tick to detect outbound spends.
+    ///
+    /// Params: `{ "coin_ids": ["0x..."], "endpoint"?: "..." }`
+    /// Returns: `{ "spent": [{coin_id, spent_block_index}],
+    ///             "missing": ["0x..."] }`
+    async fn check_coins_spent(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            coin_ids: Vec<String>,
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        if req.coin_ids.is_empty() {
+            return Ok(serde_json::json!({ "spent": [], "missing": [] }).to_string());
+        }
+        if req.coin_ids.len() > 500 {
+            return Err(EngineError::InvalidParams(format!(
+                "too many coin_ids ({}), max 500",
+                req.coin_ids.len()
+            )));
+        }
+        let ids = req
+            .coin_ids
+            .iter()
+            .map(|s| parse_bytes32(s.trim()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let client = make_client(req.endpoint.as_deref());
+        let res = client
+            .get_coin_records_by_names(ids.clone(), None, None, Some(true))
+            .await
+            .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+        let records = res.coin_records.unwrap_or_default();
+        let returned: std::collections::HashSet<Bytes32> =
+            records.iter().map(|r| r.coin.coin_id()).collect();
+        let missing: Vec<String> = ids
+            .iter()
+            .filter(|id| !returned.contains(*id))
+            .map(|id| format!("0x{}", hex::encode(id)))
+            .collect();
+        let spent: Vec<_> = records
+            .into_iter()
+            .filter(|r| r.spent)
+            .map(|r| {
+                serde_json::json!({
+                    "coin_id": format!("0x{}", hex::encode(r.coin.coin_id())),
+                    "spent_block_index": r.spent_block_index,
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "spent": spent,
+            "missing": missing,
+        })
+        .to_string())
     }
 
     /// Fetch the unspent XCH balance held across a range of derived addresses
@@ -148,11 +353,7 @@ impl SageEngine {
             address_meta.push((idx, puzzle_hash, address));
         }
 
-        let client = match req.endpoint.as_deref() {
-            None | Some("mainnet") => CoinsetClient::mainnet(),
-            Some("testnet11") => CoinsetClient::testnet11(),
-            Some(url) => CoinsetClient::new(url.to_string()),
-        };
+        let client = make_client(req.endpoint.as_deref());
 
         // Batch: coinset accepts a list, returns coin_records for all of them.
         // Filter to unspent (spent_block_index == 0).
@@ -357,11 +558,7 @@ impl SageEngine {
             serde_json::from_str(params_json)
                 .map_err(|e| EngineError::InvalidParams(e.to_string()))?
         };
-        let client = match req.endpoint.as_deref() {
-            None | Some("mainnet") => CoinsetClient::mainnet(),
-            Some("testnet11") => CoinsetClient::testnet11(),
-            Some(url) => CoinsetClient::new(url.to_string()),
-        };
+        let client = make_client(req.endpoint.as_deref());
         let state = client
             .get_blockchain_state()
             .await
@@ -658,6 +855,38 @@ impl SageEngine {
         })
         .to_string())
     }
+}
+
+fn make_client(endpoint: Option<&str>) -> CoinsetClient {
+    match endpoint {
+        None | Some("mainnet") => CoinsetClient::mainnet(),
+        Some("testnet11") => CoinsetClient::testnet11(),
+        Some(url) => CoinsetClient::new(url.to_string()),
+    }
+}
+
+fn parse_bytes32(s: &str) -> Result<Bytes32, EngineError> {
+    let bytes = hex::decode(s.trim_start_matches("0x"))
+        .map_err(|e| EngineError::InvalidParams(format!("hex: {e}")))?;
+    let arr: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| EngineError::InvalidParams("expected 32 bytes".to_string()))?;
+    Ok(Bytes32::from(arr))
+}
+
+fn serialize_coin_record(r: chia_wallet_sdk::coinset::CoinRecord) -> serde_json::Value {
+    serde_json::json!({
+        "coin_id": format!("0x{}", hex::encode(r.coin.coin_id())),
+        "parent_coin_info": format!("0x{}", hex::encode(r.coin.parent_coin_info)),
+        "puzzle_hash": format!("0x{}", hex::encode(r.coin.puzzle_hash)),
+        "amount": r.coin.amount.to_string(),
+        "coinbase": r.coinbase,
+        "confirmed_block_index": r.confirmed_block_index,
+        "spent": r.spent,
+        "spent_block_index": r.spent_block_index,
+        "timestamp": r.timestamp,
+    })
 }
 
 /// Render a mojos amount (12 decimals) as a fixed-point XCH string with
