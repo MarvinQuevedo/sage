@@ -3,6 +3,7 @@ use sqlx::query;
 
 use crate::{Asset, AssetKind, Convert, Database, Result};
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn all_cats(&self) -> Result<Vec<Asset>> {
         query!(
@@ -69,5 +70,20 @@ impl Database {
             })
         })
         .collect()
+    }
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn all_cats(&self) -> Result<Vec<Asset>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn owned_cats(&self) -> Result<Vec<Asset>> {
+        Err(crate::DatabaseError::NotImplemented)
     }
 }

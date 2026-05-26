@@ -38,6 +38,7 @@ pub struct Asset {
     pub kind: AssetKind,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn is_asset_owned(&self, hash: Bytes32) -> Result<bool> {
         let hash = hash.as_ref();
@@ -118,6 +119,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn asset(&mut self, hash: Bytes32) -> Result<Option<Asset>> {
         asset(&mut *self.tx, hash).await
@@ -171,6 +173,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_asset(conn: impl SqliteExecutor<'_>, asset: Asset) -> Result<()> {
     let hash = asset.hash.as_ref();
     let kind = asset.kind as i64;
@@ -207,6 +210,7 @@ async fn insert_asset(conn: impl SqliteExecutor<'_>, asset: Asset) -> Result<()>
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn existing_hidden_puzzle_hash(
     conn: impl SqliteExecutor<'_>,
     asset_hash: Bytes32,
@@ -226,6 +230,7 @@ async fn existing_hidden_puzzle_hash(
     .transpose()
 }
 
+#[cfg(feature = "sqlite")]
 async fn asset(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<Option<Asset>> {
     let hash = hash.as_ref();
 
@@ -256,4 +261,69 @@ async fn asset(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<Option<As
         })
     })
     .transpose()
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn is_asset_owned(&self, hash: Bytes32) -> Result<bool> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_asset(&self, asset: Asset) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_asset(&self, asset: Asset) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn asset_kind(&self, hash: Bytes32) -> Result<Option<AssetKind>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn asset(&self, hash: Bytes32) -> Result<Option<Asset>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn existing_hidden_puzzle_hash(
+        &self,
+        asset_hash: Bytes32,
+    ) -> Result<Option<Option<Bytes32>>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn asset(&mut self, hash: Bytes32) -> Result<Option<Asset>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_asset(&mut self, asset: Asset) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_hidden_puzzle_hash(
+        &mut self,
+        asset_hash: Bytes32,
+        hidden_puzzle_hash: Option<Bytes32>,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn existing_hidden_puzzle_hash(
+        &mut self,
+        asset_hash: Bytes32,
+    ) -> Result<Option<Option<Bytes32>>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn delete_asset_coins(&mut self, asset_hash: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

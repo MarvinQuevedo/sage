@@ -65,6 +65,7 @@ pub struct UnsyncedCoin {
     pub is_children_unsynced: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn coins_by_ids(&self, coin_ids: &[String]) -> Result<Vec<CoinRow>> {
         coins_by_ids(&self.pool, coin_ids).await
@@ -238,6 +239,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn insert_coin(&mut self, coin_state: CoinState) -> Result<()> {
         insert_coin(&mut *self.tx, coin_state).await
@@ -280,6 +282,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn are_coins_spendable(conn: impl SqliteExecutor<'_>, coin_ids: &[String]) -> Result<bool> {
     if coin_ids.is_empty() {
         return Ok(false);
@@ -305,6 +308,7 @@ async fn are_coins_spendable(conn: impl SqliteExecutor<'_>, coin_ids: &[String])
     Ok(count == coin_ids.len() as i64)
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_coin(conn: impl SqliteExecutor<'_>, coin_state: CoinState) -> Result<()> {
     let hash = coin_state.coin.coin_id();
     let hash = hash.as_ref();
@@ -335,6 +339,7 @@ async fn insert_coin(conn: impl SqliteExecutor<'_>, coin_state: CoinState) -> Re
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn is_known_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<bool> {
     let coin_id_ref = coin_id.as_ref();
 
@@ -348,6 +353,7 @@ async fn is_known_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Resul
     Ok(row.count > 0)
 }
 
+#[cfg(feature = "sqlite")]
 async fn unsynced_coins(conn: impl SqliteExecutor<'_>, limit: usize) -> Result<Vec<UnsyncedCoin>> {
     let limit = i64::try_from(limit)?;
 
@@ -384,6 +390,7 @@ async fn unsynced_coins(conn: impl SqliteExecutor<'_>, limit: usize) -> Result<V
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn delete_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<()> {
     let coin_id_ref = coin_id.as_ref();
 
@@ -394,6 +401,7 @@ async fn delete_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn update_coin(
     conn: impl SqliteExecutor<'_>,
     coin_id: Bytes32,
@@ -421,6 +429,7 @@ async fn update_coin(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn set_children_synced(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<()> {
     let coin_id = coin_id.as_ref();
 
@@ -434,6 +443,7 @@ async fn set_children_synced(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) ->
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn set_transaction_children_unsynced(
     conn: impl SqliteExecutor<'_>,
     mempool_item_id: Bytes32,
@@ -456,6 +466,7 @@ async fn set_transaction_children_unsynced(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_lineage_proof(
     conn: impl SqliteExecutor<'_>,
     coin_id: Bytes32,
@@ -483,6 +494,7 @@ async fn insert_lineage_proof(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn subscription_coin_ids(conn: impl SqliteExecutor<'_>) -> Result<Vec<Bytes32>> {
     query!(
         "
@@ -498,6 +510,7 @@ async fn subscription_coin_ids(conn: impl SqliteExecutor<'_>) -> Result<Vec<Byte
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn selectable_coin_count(conn: impl SqliteExecutor<'_>, asset_id: Bytes32) -> Result<u32> {
     let asset_id_ref = asset_id.as_ref();
 
@@ -511,6 +524,7 @@ async fn selectable_coin_count(conn: impl SqliteExecutor<'_>, asset_id: Bytes32)
     .convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn total_coin_count(conn: impl SqliteExecutor<'_>) -> Result<u32> {
     query!("SELECT COUNT(*) AS count FROM coins")
         .fetch_one(conn)
@@ -519,6 +533,7 @@ async fn total_coin_count(conn: impl SqliteExecutor<'_>) -> Result<u32> {
         .convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn synced_coin_count(conn: impl SqliteExecutor<'_>) -> Result<u32> {
     query!(
         "
@@ -533,6 +548,7 @@ async fn synced_coin_count(conn: impl SqliteExecutor<'_>) -> Result<u32> {
     .convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn token_balance(conn: impl SqliteExecutor<'_>, asset_id: Bytes32) -> Result<u128> {
     let asset_id_ref = asset_id.as_ref();
 
@@ -550,6 +566,7 @@ async fn token_balance(conn: impl SqliteExecutor<'_>, asset_id: Bytes32) -> Resu
     .sum()
 }
 
+#[cfg(feature = "sqlite")]
 async fn selectable_token_balance(
     conn: impl SqliteExecutor<'_>,
     asset_id: Bytes32,
@@ -570,6 +587,7 @@ async fn selectable_token_balance(
     .sum()
 }
 
+#[cfg(feature = "sqlite")]
 async fn coins_by_ids(conn: impl SqliteExecutor<'_>, coin_ids: &[String]) -> Result<Vec<CoinRow>> {
     let mut query = sqlx::QueryBuilder::new(
         "
@@ -619,6 +637,7 @@ async fn coins_by_ids(conn: impl SqliteExecutor<'_>, coin_ids: &[String]) -> Res
     Ok(coins)
 }
 
+#[cfg(feature = "sqlite")]
 async fn coin_records(
     conn: impl SqliteExecutor<'_>,
     asset_filter: AssetFilter,
@@ -721,6 +740,7 @@ async fn coin_records(
     Ok((coins, total_count))
 }
 
+#[cfg(feature = "sqlite")]
 async fn selectable_xch_coins(conn: impl SqliteExecutor<'_>) -> Result<Vec<Coin>> {
     query!("SELECT parent_coin_hash, puzzle_hash, amount FROM selectable_coins WHERE asset_id = 0")
         .fetch_all(conn)
@@ -736,6 +756,7 @@ async fn selectable_xch_coins(conn: impl SqliteExecutor<'_>) -> Result<Vec<Coin>
         .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn selectable_cat_coins(
     conn: impl SqliteExecutor<'_>,
     asset_id: Bytes32,
@@ -779,6 +800,7 @@ async fn selectable_cat_coins(
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn coin_kind(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<Option<CoinKind>> {
     let coin_id_ref = coin_id.as_ref();
 
@@ -812,6 +834,7 @@ async fn coin_kind(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<Op
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn xch_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<Option<Coin>> {
     let coin_id_ref = coin_id.as_ref();
 
@@ -836,6 +859,7 @@ async fn xch_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<Opt
     )))
 }
 
+#[cfg(feature = "sqlite")]
 async fn cat_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<Option<Cat>> {
     let coin_id_ref = coin_id.as_ref();
 
@@ -876,6 +900,7 @@ async fn cat_coin(conn: impl SqliteExecutor<'_>, coin_id: Bytes32) -> Result<Opt
     )))
 }
 
+#[cfg(feature = "sqlite")]
 async fn did_coin(
     conn: impl SqliteExecutor<'_>,
     coin_id: Bytes32,
@@ -922,6 +947,7 @@ async fn did_coin(
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn nft_coin(
     conn: impl SqliteExecutor<'_>,
     coin_id: Bytes32,
@@ -971,6 +997,7 @@ async fn nft_coin(
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn option_coin(
     conn: impl SqliteExecutor<'_>,
     coin_id: Bytes32,
@@ -1018,6 +1045,7 @@ async fn option_coin(
     )))
 }
 
+#[cfg(feature = "sqlite")]
 async fn did(conn: impl SqliteExecutor<'_>, launcher_id: Bytes32) -> Result<Option<SerializedDid>> {
     let launcher_id_ref = launcher_id.as_ref();
 
@@ -1061,6 +1089,7 @@ async fn did(conn: impl SqliteExecutor<'_>, launcher_id: Bytes32) -> Result<Opti
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn spendable_did(
     conn: impl SqliteExecutor<'_>,
     launcher_id: Bytes32,
@@ -1107,6 +1136,7 @@ async fn spendable_did(
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn nft(conn: impl SqliteExecutor<'_>, launcher_id: Bytes32) -> Result<Option<SerializedNft>> {
     let launcher_id_ref = launcher_id.as_ref();
 
@@ -1153,6 +1183,7 @@ async fn nft(conn: impl SqliteExecutor<'_>, launcher_id: Bytes32) -> Result<Opti
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn spendable_nft(
     conn: impl SqliteExecutor<'_>,
     launcher_id: Bytes32,
@@ -1202,6 +1233,7 @@ async fn spendable_nft(
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn option(
     conn: impl SqliteExecutor<'_>,
     launcher_id: Bytes32,
@@ -1249,6 +1281,7 @@ async fn option(
     )))
 }
 
+#[cfg(feature = "sqlite")]
 async fn spendable_option(
     conn: impl SqliteExecutor<'_>,
     launcher_id: Bytes32,
@@ -1294,4 +1327,184 @@ async fn spendable_option(
             row.p2_puzzle_hash.convert()?,
         ),
     )))
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn coins_by_ids(&self, coin_ids: &[String]) -> Result<Vec<CoinRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn coin_records(
+        &self,
+        asset_filter: AssetFilter,
+        limit: u32,
+        offset: u32,
+        sort_mode: CoinSortMode,
+        ascending: bool,
+        filter_mode: CoinFilterMode,
+    ) -> Result<(Vec<CoinRow>, u32)> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn are_coins_spendable(&self, coin_ids: &[String]) -> Result<bool> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn total_coin_count(&self) -> Result<u32> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn selectable_xch_coin_count(&self) -> Result<u32> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn selectable_cat_coin_count(&self, asset_id: Bytes32) -> Result<u32> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn synced_coin_count(&self) -> Result<u32> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn unsynced_coins(&self, limit: usize) -> Result<Vec<UnsyncedCoin>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_coin(
+        &self,
+        coin_id: Bytes32,
+        asset_hash: Bytes32,
+        p2_puzzle_hash: Bytes32,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn subscription_coin_ids(&self) -> Result<Vec<Bytes32>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn xch_balance(&self) -> Result<u128> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn cat_balance(&self, asset_id: Bytes32) -> Result<u128> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn selectable_xch_balance(&self) -> Result<u128> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn selectable_cat_balance(&self, asset_id: Bytes32) -> Result<u128> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn selectable_xch_coins(&self) -> Result<Vec<Coin>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn selectable_cat_coins(&self, asset_id: Bytes32) -> Result<Vec<Cat>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn coin_kind(&self, coin_id: Bytes32) -> Result<Option<CoinKind>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn xch_coin(&self, coin_id: Bytes32) -> Result<Option<Coin>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn cat_coin(&self, coin_id: Bytes32) -> Result<Option<Cat>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn did_coin(&self, coin_id: Bytes32) -> Result<Option<SerializedDid>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn nft_coin(&self, coin_id: Bytes32) -> Result<Option<SerializedNft>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn option_coin(&self, coin_id: Bytes32) -> Result<Option<OptionContract>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn did(&self, launcher_id: Bytes32) -> Result<Option<SerializedDid>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn spendable_did(&self, launcher_id: Bytes32) -> Result<Option<SerializedDid>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn nft(&self, launcher_id: Bytes32) -> Result<Option<SerializedNft>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn spendable_nft(&self, launcher_id: Bytes32) -> Result<Option<SerializedNft>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn option(&self, launcher_id: Bytes32) -> Result<Option<OptionContract>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn spendable_option(&self, launcher_id: Bytes32) -> Result<Option<OptionContract>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn underlying_coin_kind(&self, launcher_id: Bytes32) -> Result<Option<CoinKind>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn insert_coin(&mut self, coin_state: CoinState) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn is_known_coin(&mut self, coin_id: Bytes32) -> Result<bool> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_coin(
+        &mut self,
+        coin_id: Bytes32,
+        asset_hash: Bytes32,
+        p2_puzzle_hash: Bytes32,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn set_children_synced(&mut self, coin_id: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn set_transaction_children_unsynced(
+        &mut self,
+        mempool_item_id: Bytes32,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn delete_coin(&mut self, coin_id: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_lineage_proof(
+        &mut self,
+        coin_id: Bytes32,
+        lineage_proof: LineageProof,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

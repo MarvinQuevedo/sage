@@ -49,6 +49,7 @@ pub struct OptionAssetsRow {
     pub expiration_seconds: u64,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn owned_options(
         &self,
@@ -323,6 +324,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn insert_option(&mut self, hash: Bytes32, coin_info: &OptionCoinInfo) -> Result<()> {
         let hash = hash.as_ref();
@@ -357,6 +359,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn owned_options(
     conn: impl SqliteExecutor<'_>,
     limit: u32,
@@ -551,4 +554,50 @@ async fn owned_options(
         .collect::<Result<Vec<_>>>()?;
 
     Ok((options, total_count))
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn owned_options(
+        &self,
+        limit: u32,
+        offset: u32,
+        sort_mode: OptionSortMode,
+        ascending: bool,
+        find_value: Option<String>,
+        include_hidden: bool,
+    ) -> Result<(Vec<OptionRow>, u32)> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn wallet_option(&self, launcher_id: Bytes32) -> Result<Option<OptionRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn option_underlying(
+        &self,
+        launcher_id: Bytes32,
+    ) -> Result<Option<OptionUnderlying>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn offer_option_info(&self, hash: Bytes32) -> Result<Option<OptionOfferInfo>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn option_assets(&self, launcher_id: Bytes32) -> Result<Option<OptionAssetsRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn insert_option(&mut self, hash: Bytes32, coin_info: &OptionCoinInfo) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

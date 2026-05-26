@@ -12,6 +12,7 @@ pub struct MempoolItem {
     pub submitted_timestamp: Option<u64>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn mempool_items_to_submit(
         &self,
@@ -34,6 +35,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn insert_mempool_item(
         &mut self,
@@ -76,6 +78,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_mempool_item(
     conn: impl SqliteExecutor<'_>,
     hash: Bytes32,
@@ -101,6 +104,7 @@ async fn insert_mempool_item(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_mempool_coin(
     conn: impl SqliteExecutor<'_>,
     mempool_item_id: Bytes32,
@@ -127,6 +131,7 @@ async fn insert_mempool_coin(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_mempool_spend(
     conn: impl SqliteExecutor<'_>,
     mempool_item_id: Bytes32,
@@ -163,6 +168,7 @@ async fn insert_mempool_spend(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn mempool_items_to_submit(
     conn: impl SqliteExecutor<'_>,
     check_every_seconds: i64,
@@ -192,6 +198,7 @@ async fn mempool_items_to_submit(
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn mempool_coin_spends(
     conn: impl SqliteExecutor<'_>,
     mempool_item_id: Bytes32,
@@ -225,6 +232,7 @@ async fn mempool_coin_spends(
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn mempool_items_for_input(
     conn: impl SqliteExecutor<'_>,
     coin_id: Bytes32,
@@ -248,6 +256,7 @@ async fn mempool_items_for_input(
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn mempool_items_for_output(
     conn: impl SqliteExecutor<'_>,
     coin_id: Bytes32,
@@ -271,6 +280,7 @@ async fn mempool_items_for_output(
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn remove_mempool_item(conn: &mut SqliteConnection, mempool_item_id: Bytes32) -> Result<()> {
     let mempool_item_id = mempool_item_id.as_ref();
 
@@ -294,6 +304,7 @@ async fn remove_mempool_item(conn: &mut SqliteConnection, mempool_item_id: Bytes
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn update_mempool_item_time(
     conn: impl SqliteExecutor<'_>,
     mempool_item_id: Bytes32,
@@ -310,6 +321,7 @@ async fn update_mempool_item_time(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn mempool_items(conn: impl SqliteExecutor<'_>) -> Result<Vec<MempoolItem>> {
     query!(
         "
@@ -330,4 +342,75 @@ async fn mempool_items(conn: impl SqliteExecutor<'_>) -> Result<Vec<MempoolItem>
         })
     })
     .collect()
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn mempool_items_to_submit(
+        &self,
+        check_every_seconds: i64,
+        limit: i64,
+    ) -> Result<Vec<MempoolItem>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn mempool_coin_spends(&self, mempool_item_id: Bytes32) -> Result<Vec<CoinSpend>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_mempool_item_time(&self, mempool_item_id: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn mempool_items(&self) -> Result<Vec<MempoolItem>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn insert_mempool_item(
+        &mut self,
+        hash: Bytes32,
+        aggregated_signature: Signature,
+        fee: u64,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_mempool_coin(
+        &mut self,
+        mempool_item_id: Bytes32,
+        coin_id: Bytes32,
+        is_input: bool,
+        is_output: bool,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_mempool_spend(
+        &mut self,
+        mempool_item_id: Bytes32,
+        coin_spend: CoinSpend,
+        seq: usize,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn mempool_items_for_input(&mut self, coin_id: Bytes32) -> Result<Vec<Bytes32>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn mempool_items_for_output(&mut self, coin_id: Bytes32) -> Result<Vec<Bytes32>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn remove_mempool_item(&mut self, mempool_item_id: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

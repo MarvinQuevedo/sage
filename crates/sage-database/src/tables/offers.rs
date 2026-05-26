@@ -33,6 +33,7 @@ pub struct OfferedAsset {
     pub royalty: u64,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn offer(&self, offer_id: Bytes32) -> Result<Option<OfferRow>> {
         offer(&self.pool, offer_id).await
@@ -63,6 +64,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn insert_offer(&mut self, offer: OfferRow) -> Result<()> {
         insert_offer(&mut *self.tx, offer).await
@@ -108,6 +110,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn offers_for_asset(
     conn: impl SqliteExecutor<'_>,
     asset_id: Bytes32,
@@ -159,6 +162,7 @@ async fn offers_for_asset(
         .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn offer_assets(
     conn: impl SqliteExecutor<'_>,
     offer_id: Bytes32,
@@ -208,6 +212,7 @@ async fn offer_assets(
         .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_offer(conn: impl SqliteExecutor<'_>, offer: OfferRow) -> Result<()> {
     let offer_id_ref = offer.offer_id.as_ref();
 
@@ -240,6 +245,7 @@ async fn insert_offer(conn: impl SqliteExecutor<'_>, offer: OfferRow) -> Result<
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_offer_asset(
     conn: impl SqliteExecutor<'_>,
     offer_id: Bytes32,
@@ -275,6 +281,7 @@ async fn insert_offer_asset(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_offered_coin(
     conn: impl SqliteExecutor<'_>,
     offer_hash: Bytes32,
@@ -294,6 +301,7 @@ async fn insert_offered_coin(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn offer(conn: impl SqliteExecutor<'_>, offer_id: Bytes32) -> Result<Option<OfferRow>> {
     let offer_id_ref = offer_id.as_ref();
     let row = sqlx::query!(
@@ -332,6 +340,7 @@ async fn offer(conn: impl SqliteExecutor<'_>, offer_id: Bytes32) -> Result<Optio
     .transpose()
 }
 
+#[cfg(feature = "sqlite")]
 async fn offers(
     conn: impl SqliteExecutor<'_>,
     status: Option<OfferStatus>,
@@ -377,6 +386,7 @@ async fn offers(
         .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn delete_offer(conn: impl SqliteExecutor<'_>, offer_id: Bytes32) -> Result<()> {
     let offer_id_ref = offer_id.as_ref();
     sqlx::query("DELETE FROM offers WHERE hash = ?")
@@ -386,6 +396,7 @@ async fn delete_offer(conn: impl SqliteExecutor<'_>, offer_id: Bytes32) -> Resul
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn update_offer_status(
     conn: impl SqliteExecutor<'_>,
     offer_id: Bytes32,
@@ -398,4 +409,78 @@ async fn update_offer_status(
         .execute(conn)
         .await?;
     Ok(())
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn offer(&self, offer_id: Bytes32) -> Result<Option<OfferRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn offer_assets(&self, offer_id: Bytes32) -> Result<Vec<OfferedAsset>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn delete_offer(&self, offer_id: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn offers(&self, status: Option<OfferStatus>) -> Result<Vec<OfferRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_offer_status(&self, offer_id: Bytes32, status: OfferStatus) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn offers_for_asset(
+        &self,
+        asset_id: Bytes32,
+        status: Option<OfferStatus>,
+    ) -> Result<Vec<OfferRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn insert_offer(&mut self, offer: OfferRow) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_offered_coin(&mut self, offer_id: Bytes32, coin_id: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_offer_asset(
+        &mut self,
+        offer_id: Bytes32,
+        asset_id: Bytes32,
+        amount: u64,
+        royalty: u64,
+        is_requested: bool,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_offer_status(
+        &mut self,
+        offer_id: Bytes32,
+        status: OfferStatus,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn offers_for_asset(
+        &mut self,
+        asset_id: Bytes32,
+        status: Option<OfferStatus>,
+    ) -> Result<Vec<OfferRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

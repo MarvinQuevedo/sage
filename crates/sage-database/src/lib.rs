@@ -1,18 +1,14 @@
 #[cfg(feature = "sqlite")]
 mod maintenance;
 mod serialized_primitives;
-#[cfg(feature = "sqlite")]
 mod tables;
-#[cfg(feature = "sqlite")]
 mod utils;
 
 #[cfg(feature = "sqlite")]
 pub use maintenance::*;
 pub use serialized_primitives::*;
-#[cfg(feature = "sqlite")]
 pub use tables::*;
 
-#[cfg(feature = "sqlite")]
 pub(crate) use utils::*;
 
 use std::num::TryFromIntError;
@@ -117,9 +113,38 @@ pub struct Database {
 }
 
 #[cfg(not(feature = "sqlite"))]
+impl Database {
+    /// Begin a transaction. Stub — returns NotImplemented until the JS-callback
+    /// storage backend is wired in. The signature matches the native impl so
+    /// consumers (sage-wallet, etc.) compile unchanged.
+    #[allow(clippy::unused_async)]
+    pub async fn tx(&self) -> Result<DatabaseTx<'_>> {
+        Err(DatabaseError::NotImplemented)
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn run_rust_migrations(&self, _ticker: String) -> Result<()> {
+        Err(DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
 #[derive(Debug)]
 pub struct DatabaseTx<'a> {
     _private: core::marker::PhantomData<&'a ()>,
+}
+
+#[cfg(not(feature = "sqlite"))]
+impl DatabaseTx<'_> {
+    #[allow(clippy::unused_async)]
+    pub async fn commit(self) -> Result<()> {
+        Err(DatabaseError::NotImplemented)
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn rollback(self) -> Result<()> {
+        Err(DatabaseError::NotImplemented)
+    }
 }
 
 #[derive(Debug, Error)]

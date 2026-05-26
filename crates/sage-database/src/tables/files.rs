@@ -38,6 +38,7 @@ pub struct ResizedImage {
     pub mime_type: Option<String>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn candidates_for_download(
         &self,
@@ -69,6 +70,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn insert_file(&mut self, hash: Bytes32) -> Result<()> {
         insert_file(&mut *self.tx, hash).await
@@ -126,6 +128,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_file(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<()> {
     let hash = hash.as_ref();
 
@@ -136,6 +139,7 @@ async fn insert_file(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<()>
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_file_uri(conn: impl SqliteExecutor<'_>, hash: Bytes32, uri: String) -> Result<()> {
     let hash = hash.as_ref();
 
@@ -150,6 +154,7 @@ async fn insert_file_uri(conn: impl SqliteExecutor<'_>, hash: Bytes32, uri: Stri
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn file_data(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<Option<Vec<u8>>> {
     let hash = hash.as_ref();
 
@@ -160,6 +165,7 @@ async fn file_data(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<Optio
     Ok(row.and_then(|row| row.data))
 }
 
+#[cfg(feature = "sqlite")]
 async fn full_file_data(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<Option<FileData>> {
     let hash = hash.as_ref();
 
@@ -181,6 +187,7 @@ async fn full_file_data(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<
     .transpose()
 }
 
+#[cfg(feature = "sqlite")]
 async fn candidates_for_download(
     conn: impl SqliteExecutor<'_>,
     check_every_seconds: i64,
@@ -215,6 +222,7 @@ async fn candidates_for_download(
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn update_failed_uri(
     conn: impl SqliteExecutor<'_>,
     hash: Bytes32,
@@ -237,6 +245,7 @@ async fn update_failed_uri(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn update_checked_uri(
     conn: impl SqliteExecutor<'_>,
     hash: Bytes32,
@@ -259,6 +268,7 @@ async fn update_checked_uri(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn update_file(
     conn: impl SqliteExecutor<'_>,
     hash: Bytes32,
@@ -285,6 +295,7 @@ async fn update_file(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn nfts_with_metadata_hash(
     conn: impl SqliteExecutor<'_>,
     hash: Bytes32,
@@ -305,6 +316,7 @@ async fn nfts_with_metadata_hash(
     .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_resized_image(
     conn: impl SqliteExecutor<'_>,
     file_hash: Bytes32,
@@ -326,6 +338,7 @@ async fn insert_resized_image(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn resized_image(
     conn: impl SqliteExecutor<'_>,
     hash: Bytes32,
@@ -351,6 +364,7 @@ async fn resized_image(
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn delete_file_data(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<()> {
     let hash = hash.as_ref();
 
@@ -361,6 +375,7 @@ async fn delete_file_data(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Resul
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn set_uri_unchecked(conn: impl SqliteExecutor<'_>, uri: String) -> Result<()> {
     query!(
         "UPDATE file_uris 
@@ -375,6 +390,7 @@ async fn set_uri_unchecked(conn: impl SqliteExecutor<'_>, uri: String) -> Result
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn checked_files(conn: impl SqliteExecutor<'_>) -> Result<u64> {
     query!(
         "
@@ -393,6 +409,7 @@ async fn checked_files(conn: impl SqliteExecutor<'_>) -> Result<u64> {
     .map_err(crate::DatabaseError::PrecisionLost)
 }
 
+#[cfg(feature = "sqlite")]
 async fn total_files(conn: impl SqliteExecutor<'_>) -> Result<u64> {
     query!(
         "
@@ -408,4 +425,99 @@ async fn total_files(conn: impl SqliteExecutor<'_>) -> Result<u64> {
     .count
     .try_into()
     .map_err(crate::DatabaseError::PrecisionLost)
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn candidates_for_download(
+        &self,
+        check_every_seconds: i64,
+        max_failed_attempts: u32,
+        limit: u32,
+    ) -> Result<Vec<FileUri>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn thumbnail(&self, hash: Bytes32) -> Result<Option<ResizedImage>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn icon(&self, hash: Bytes32) -> Result<Option<ResizedImage>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn full_file_data(&self, hash: Bytes32) -> Result<Option<FileData>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn checked_files(&self) -> Result<u64> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn total_files(&self) -> Result<u64> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn insert_file(&mut self, hash: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_file_uri(&mut self, hash: Bytes32, uri: String) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn file_data(&mut self, hash: Bytes32) -> Result<Option<Vec<u8>>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_checked_uri(&mut self, hash: Bytes32, uri: String) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_failed_uri(&mut self, hash: Bytes32, uri: String) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_file(
+        &mut self,
+        hash: Bytes32,
+        data: Vec<u8>,
+        mime_type: String,
+        is_hash_match: bool,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_resized_image(
+        &mut self,
+        file_hash: Bytes32,
+        kind: ResizedImageKind,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn icon(&mut self, hash: Bytes32) -> Result<Option<ResizedImage>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn nfts_with_metadata_hash(&mut self, hash: Bytes32) -> Result<Vec<UpdateableNft>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn delete_file_data(&mut self, hash: Bytes32) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn set_uri_unchecked(&mut self, uri: String) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

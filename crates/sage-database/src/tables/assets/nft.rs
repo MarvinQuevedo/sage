@@ -60,6 +60,7 @@ pub struct NftOfferInfo {
     pub royalty_basis_points: u16,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn wallet_nft(&self, hash: Bytes32) -> Result<Option<NftRow>> {
         let hash = hash.as_ref();
@@ -350,6 +351,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn insert_nft(&mut self, hash: Bytes32, coin_info: &NftCoinInfo) -> Result<()> {
         let hash = hash.as_ref();
@@ -514,5 +516,68 @@ impl DatabaseTx<'_> {
         .await?;
 
         Ok(())
+    }
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn wallet_nft(&self, hash: Bytes32) -> Result<Option<NftRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn owned_nfts(
+        &self,
+        name_search: Option<String>,
+        group_search: Option<NftGroupSearch>,
+        sort_mode: NftSortMode,
+        include_hidden: bool,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<NftRow>, u32)> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn distinct_minter_dids(
+        &self,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<Bytes32>, u32)> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn offer_nft_info(&self, hash: Bytes32) -> Result<Option<NftOfferInfo>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn insert_nft(&mut self, hash: Bytes32, coin_info: &NftCoinInfo) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_nft(&mut self, hash: Bytes32, coin_info: &NftCoinInfo) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_nft_data_hash_urls(
+        &mut self,
+        data_hash: Bytes32,
+        icon_url: String,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn update_nft_metadata(
+        &mut self,
+        hash: Bytes32,
+        metadata_info: NftMetadataInfo,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
     }
 }

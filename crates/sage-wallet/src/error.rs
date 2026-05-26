@@ -1,7 +1,8 @@
 use std::{num::TryFromIntError, time::SystemTimeError};
 
+#[cfg(not(target_arch = "wasm32"))]
+use chia_wallet_sdk::client::ClientError;
 use chia_wallet_sdk::{
-    client::ClientError,
     clvm_traits::{FromClvmError, ToClvmError},
     clvmr::error::EvalErr,
     prelude::*,
@@ -11,13 +12,16 @@ use chia_wallet_sdk::{
 use sage_assets::UriError;
 use sage_database::{CoinKind, DatabaseError};
 use thiserror::Error;
-use tokio::{task::JoinError, time::error::Elapsed};
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::JoinError;
+use tokio::time::error::Elapsed;
 
 #[derive(Debug, Error)]
 pub enum WalletError {
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("Client error: {0}")]
     Client(#[from] ClientError),
 
@@ -54,6 +58,7 @@ pub enum WalletError {
     #[error("System time error: {0}")]
     SystemTime(#[from] SystemTimeError),
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("Join error: {0}")]
     Join(#[from] JoinError),
 

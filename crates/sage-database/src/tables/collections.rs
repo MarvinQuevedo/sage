@@ -15,6 +15,7 @@ pub struct CollectionRow {
     pub is_visible: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn collections(
         &self,
@@ -34,6 +35,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn insert_collection(&mut self, row: CollectionRow) -> Result<()> {
         insert_collection(&mut *self.tx, row).await
@@ -44,6 +46,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn collection(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<Option<CollectionRow>> {
     let hash_ref = hash.as_ref();
     let row = query!(
@@ -70,6 +73,7 @@ async fn collection(conn: impl SqliteExecutor<'_>, hash: Bytes32) -> Result<Opti
     .transpose()
 }
 
+#[cfg(feature = "sqlite")]
 async fn collections(
     conn: impl SqliteExecutor<'_>,
     limit: u32,
@@ -117,6 +121,7 @@ async fn collections(
     Ok((collections, total_count))
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_collection(conn: impl SqliteExecutor<'_>, row: CollectionRow) -> Result<()> {
     let hash_ref = row.hash.as_ref();
     let minter_hash_ref = row.minter_hash.as_ref();
@@ -143,6 +148,7 @@ async fn insert_collection(conn: impl SqliteExecutor<'_>, row: CollectionRow) ->
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn set_collection_visible(
     conn: impl SqliteExecutor<'_>,
     hash: Bytes32,
@@ -158,4 +164,40 @@ async fn set_collection_visible(
     .await?;
 
     Ok(())
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn collections(
+        &self,
+        limit: u32,
+        offset: u32,
+        include_hidden: bool,
+    ) -> Result<(Vec<CollectionRow>, u32)> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn collection(&self, hash: Bytes32) -> Result<Option<CollectionRow>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn set_collection_visible(&self, hash: Bytes32, visible: bool) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn insert_collection(&mut self, row: CollectionRow) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn set_collection_visible(&mut self, hash: Bytes32, visible: bool) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

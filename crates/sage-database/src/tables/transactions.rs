@@ -19,6 +19,7 @@ pub struct TransactionCoin {
     pub p2_puzzle_hash: Option<Bytes32>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn transaction(&self, height: u32) -> Result<Option<Transaction>> {
         transaction(&self.pool, height).await
@@ -36,6 +37,7 @@ impl Database {
 }
 
 // Helper function to create a TransactionCoin from a database row
+#[cfg(feature = "sqlite")]
 fn create_transaction_coin(row: &sqlx::sqlite::SqliteRow) -> Result<TransactionCoin> {
     let coin = Coin::new(
         row.get::<Vec<u8>, _>("parent_coin_hash").convert()?,
@@ -71,6 +73,7 @@ fn create_transaction_coin(row: &sqlx::sqlite::SqliteRow) -> Result<TransactionC
     })
 }
 
+#[cfg(feature = "sqlite")]
 async fn transaction(conn: impl SqliteExecutor<'_>, height: u32) -> Result<Option<Transaction>> {
     let rows = sqlx::query!(
         "SELECT 	
@@ -141,6 +144,7 @@ async fn transaction(conn: impl SqliteExecutor<'_>, height: u32) -> Result<Optio
     }))
 }
 
+#[cfg(feature = "sqlite")]
 async fn transactions(
     conn: impl SqliteExecutor<'_>,
     find_value: Option<String>,
@@ -219,6 +223,7 @@ pub fn puzzle_hash_from_address(address: &str) -> Option<String> {
 }
 
 // Helper function to group rows by height and create Transaction structs
+#[cfg(feature = "sqlite")]
 fn group_rows_into_transactions(
     rows: Vec<sqlx::sqlite::SqliteRow>,
     sort_ascending: bool,
@@ -271,4 +276,25 @@ fn group_rows_into_transactions(
     }
 
     Ok(transactions)
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn transaction(&self, height: u32) -> Result<Option<Transaction>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn transactions(
+        &self,
+        find_value: Option<String>,
+        sort_ascending: bool,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<Transaction>, u32)> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

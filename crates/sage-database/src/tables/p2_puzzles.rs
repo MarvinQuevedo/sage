@@ -52,6 +52,7 @@ pub struct DerivationRow {
     pub synthetic_key: PublicKey,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub async fn public_key(&self, p2_puzzle_hash: Bytes32) -> Result<Option<PublicKey>> {
         public_key(&self.pool, p2_puzzle_hash).await
@@ -130,6 +131,7 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl DatabaseTx<'_> {
     pub async fn custody_p2_puzzle_hash(
         &mut self,
@@ -177,6 +179,7 @@ impl DatabaseTx<'_> {
     }
 }
 
+#[cfg(feature = "sqlite")]
 async fn custody_p2_puzzle_hashes(conn: impl SqliteExecutor<'_>) -> Result<Vec<Bytes32>> {
     query!("SELECT hash FROM p2_puzzles WHERE kind IN (0, 3)")
         .fetch_all(conn)
@@ -186,6 +189,7 @@ async fn custody_p2_puzzle_hashes(conn: impl SqliteExecutor<'_>) -> Result<Vec<B
         .collect()
 }
 
+#[cfg(feature = "sqlite")]
 async fn custody_p2_puzzle_hash(
     conn: impl SqliteExecutor<'_>,
     derivation_index: u32,
@@ -206,6 +210,7 @@ async fn custody_p2_puzzle_hash(
     .convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn is_custody_p2_puzzle_hash(
     conn: impl SqliteExecutor<'_>,
     puzzle_hash: Bytes32,
@@ -222,6 +227,7 @@ async fn is_custody_p2_puzzle_hash(
         > 0)
 }
 
+#[cfg(feature = "sqlite")]
 async fn is_p2_puzzle_hash(conn: impl SqliteExecutor<'_>, puzzle_hash: Bytes32) -> Result<bool> {
     let puzzle_hash = puzzle_hash.as_ref();
 
@@ -235,6 +241,7 @@ async fn is_p2_puzzle_hash(conn: impl SqliteExecutor<'_>, puzzle_hash: Bytes32) 
         > 0)
 }
 
+#[cfg(feature = "sqlite")]
 async fn derivation_index(conn: impl SqliteExecutor<'_>, is_hardened: bool) -> Result<u32> {
     query!(
         "
@@ -250,6 +257,7 @@ async fn derivation_index(conn: impl SqliteExecutor<'_>, is_hardened: bool) -> R
     .convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn max_derivation_index(
     conn: impl SqliteExecutor<'_>,
     is_hardened: bool,
@@ -268,6 +276,7 @@ async fn max_derivation_index(
     row.derivation_index.convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn derivations(
     conn: impl SqliteExecutor<'_>,
     is_hardened: bool,
@@ -312,6 +321,7 @@ async fn derivations(
     Ok((derivations, total_count))
 }
 
+#[cfg(feature = "sqlite")]
 async fn unused_derivation_index(conn: impl SqliteExecutor<'_>, is_hardened: bool) -> Result<u32> {
     query!(
         "
@@ -328,6 +338,7 @@ async fn unused_derivation_index(conn: impl SqliteExecutor<'_>, is_hardened: boo
     .convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_custody_p2_puzzle(
     conn: impl SqliteExecutor<'_>,
     p2_puzzle_hash: Bytes32,
@@ -357,6 +368,7 @@ async fn insert_custody_p2_puzzle(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_clawback_p2_puzzle(
     conn: impl SqliteExecutor<'_>,
     clawback: ClawbackV2,
@@ -385,6 +397,7 @@ async fn insert_clawback_p2_puzzle(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_option_p2_puzzle(
     conn: impl SqliteExecutor<'_>,
     underlying: OptionUnderlying,
@@ -418,6 +431,7 @@ async fn insert_option_p2_puzzle(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn insert_arbor_p2_puzzle(conn: impl SqliteExecutor<'_>, key: PublicKey) -> Result<()> {
     let p2_puzzle_hash = P2DelegatedConditionsArgs::new(key)
         .curry_tree_hash()
@@ -442,6 +456,7 @@ async fn insert_arbor_p2_puzzle(conn: impl SqliteExecutor<'_>, key: PublicKey) -
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 async fn p2_puzzle_kind(
     conn: impl SqliteExecutor<'_>,
     p2_puzzle_hash: Bytes32,
@@ -461,6 +476,7 @@ async fn p2_puzzle_kind(
     })
 }
 
+#[cfg(feature = "sqlite")]
 async fn public_key(
     conn: impl SqliteExecutor<'_>,
     p2_puzzle_hash: Bytes32,
@@ -482,6 +498,7 @@ async fn public_key(
     row.map(|row| row.key.convert()).transpose()
 }
 
+#[cfg(feature = "sqlite")]
 async fn clawback(conn: impl SqliteExecutor<'_>, p2_puzzle_hash: Bytes32) -> Result<Clawback> {
     let p2_puzzle_hash = p2_puzzle_hash.as_ref();
 
@@ -511,6 +528,7 @@ async fn clawback(conn: impl SqliteExecutor<'_>, p2_puzzle_hash: Bytes32) -> Res
     })
 }
 
+#[cfg(feature = "sqlite")]
 async fn underlying_launcher_id(
     conn: impl SqliteExecutor<'_>,
     p2_puzzle_hash: Bytes32,
@@ -534,6 +552,7 @@ async fn underlying_launcher_id(
     .convert()
 }
 
+#[cfg(feature = "sqlite")]
 async fn arbor_key(
     conn: impl SqliteExecutor<'_>,
     p2_puzzle_hash: Bytes32,
@@ -555,6 +574,7 @@ async fn arbor_key(
     row.map(|row| row.key.convert()).transpose()
 }
 
+#[cfg(feature = "sqlite")]
 async fn derivation(
     conn: impl SqliteExecutor<'_>,
     public_key: PublicKey,
@@ -576,4 +596,97 @@ async fn derivation(
         derivation_index: row.derivation_index.convert()?,
         is_hardened: row.is_hardened,
     }))
+}
+
+
+// ─── Auto-generated stubs for no-sqlite (wasm32) builds ────────────────────
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl Database {
+    pub async fn public_key(&self, p2_puzzle_hash: Bytes32) -> Result<Option<PublicKey>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn custody_p2_puzzle_hashes(&self) -> Result<Vec<Bytes32>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn is_custody_p2_puzzle_hash(&self, puzzle_hash: Bytes32) -> Result<bool> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn is_p2_puzzle_hash(&self, puzzle_hash: Bytes32) -> Result<bool> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn p2_puzzle(&self, puzzle_hash: Bytes32) -> Result<P2Puzzle> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn derivation(&self, public_key: PublicKey) -> Result<Option<Derivation>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn derivations(
+        &self,
+        is_hardened: bool,
+        limit: u32,
+        offset: u32,
+    ) -> Result<(Vec<DerivationRow>, u32)> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn max_derivation_index(&self, is_hardened: bool) -> Result<Option<u32>> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[allow(unused_variables, clippy::diverging_sub_expression)]
+impl DatabaseTx<'_> {
+    pub async fn custody_p2_puzzle_hash(
+        &mut self,
+        derivation_index: u32,
+        is_hardened: bool,
+    ) -> Result<Bytes32> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn is_custody_p2_puzzle_hash(&mut self, puzzle_hash: Bytes32) -> Result<bool> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn is_p2_puzzle_hash(&mut self, puzzle_hash: Bytes32) -> Result<bool> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn derivation_index(&mut self, is_hardened: bool) -> Result<u32> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn unused_derivation_index(&mut self, is_hardened: bool) -> Result<u32> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_custody_p2_puzzle(
+        &mut self,
+        p2_puzzle_hash: Bytes32,
+        key: PublicKey,
+        derivation: Derivation,
+    ) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_clawback_p2_puzzle(&mut self, clawback: ClawbackV2) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_option_p2_puzzle(&mut self, underlying: OptionUnderlying) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
+
+    pub async fn insert_arbor_p2_puzzle(&mut self, key: PublicKey) -> Result<()> {
+        Err(crate::DatabaseError::NotImplemented)
+    }
 }

@@ -1,7 +1,10 @@
 mod aggregate_offer;
+#[cfg(not(target_arch = "wasm32"))]
 mod cancel_offer;
 mod make_offer;
+#[cfg(not(target_arch = "wasm32"))]
 mod offer_assets;
+#[cfg(not(target_arch = "wasm32"))]
 mod take_offer;
 
 pub use aggregate_offer::*;

@@ -16,10 +16,14 @@ use crate::UriError;
 use super::{Thumbnail, thumbnail as make_thumbnail};
 
 /// On wasm32 the host handles thumbnail generation (Canvas / OffscreenCanvas),
-/// so the Rust-side `Thumbnail` type is just a stub.
+/// so the Rust-side `Thumbnail` is a passthrough struct. The icon/thumbnail
+/// byte buffers stay empty until the host fills them.
 #[cfg(target_arch = "wasm32")]
-#[derive(Debug, Clone)]
-pub struct Thumbnail;
+#[derive(Debug, Clone, Default)]
+pub struct Thumbnail {
+    pub icon: Vec<u8>,
+    pub thumbnail: Vec<u8>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Data {
