@@ -112,9 +112,230 @@ impl SageEngine {
             "scan_puzzle_hashes" => self.scan_puzzle_hashes(params_json).await,
             "scan_hints" => self.scan_hints(params_json).await,
             "check_coins_spent" => self.check_coins_spent(params_json).await,
+            "send_xch" => self.send_xch(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
+    }
+
+    /// Send XCH: build a SpendBundle from a single input coin, sign it, and
+    /// push it via coinset. Multi-coin selection lives on the JS side
+    /// (chrome.storage.local["coins.<fp>"]) so the engine stays stateless
+    /// about which coins to pick.
+    ///
+    /// Params:
+    /// ```
+    /// {
+    ///   fingerprint: u32,
+    ///   recipient_address: "xch1...",     // bech32m, destination
+    ///   amount_mojos: "1000000000000",    // u64 as string
+    ///   fee_mojos: "0",                    // u64 as string
+    ///   input_coin: {                      // single coin picked by JS
+    ///     parent_coin_info: "0x...",
+    ///     puzzle_hash: "0x...",
+    ///     amount: "5000000000000",
+    ///     derivation_index: 7,             // index whose synthetic pk owns this coin
+    ///   },
+    ///   change_index: 0,                   // derivation index to receive change
+    ///   testnet: false,
+    ///   endpoint?: "mainnet" | "testnet11" | "<url>",
+    ///   broadcast?: true,                  // default true — set false to dry-run
+    /// }
+    /// ```
+    ///
+    /// Returns: `{ tx_id, status, error?, spend_bundle: { coin_spends, aggregated_signature } }`.
+    async fn send_xch(&self, params_json: &str) -> Result<String, EngineError> {
+        use chia_wallet_sdk::{
+            chia::{
+                bls::{sign, Signature},
+                consensus::consensus_constants::ConsensusConstants,
+                protocol::SpendBundle,
+            },
+            driver::{SpendContext, StandardLayer},
+            signer::{AggSigConstants, RequiredBlsSignature, RequiredSignature},
+            types::MAINNET_CONSTANTS,
+        };
+
+        #[derive(Deserialize)]
+        struct InputCoin {
+            parent_coin_info: String,
+            puzzle_hash: String,
+            amount: String,
+            derivation_index: u32,
+        }
+        #[derive(Deserialize)]
+        struct Req {
+            fingerprint: u32,
+            recipient_address: String,
+            amount_mojos: String,
+            #[serde(default = "default_zero_mojos")]
+            fee_mojos: String,
+            input_coin: InputCoin,
+            #[serde(default)]
+            change_index: u32,
+            #[serde(default)]
+            testnet: bool,
+            #[serde(default)]
+            endpoint: Option<String>,
+            #[serde(default = "default_true")]
+            broadcast: bool,
+        }
+        fn default_zero_mojos() -> String {
+            "0".to_string()
+        }
+        fn default_true() -> bool {
+            true
+        }
+
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+
+        // 1. Parse + validate
+        let amount: u64 = req
+            .amount_mojos
+            .parse()
+            .map_err(|_| EngineError::InvalidParams("amount_mojos must be u64".to_string()))?;
+        let fee: u64 = req
+            .fee_mojos
+            .parse()
+            .map_err(|_| EngineError::InvalidParams("fee_mojos must be u64".to_string()))?;
+        let input_amount: u64 = req
+            .input_coin
+            .amount
+            .parse()
+            .map_err(|_| EngineError::InvalidParams("input_coin.amount must be u64".to_string()))?;
+        if amount == 0 {
+            return Err(EngineError::InvalidParams(
+                "amount_mojos must be > 0".to_string(),
+            ));
+        }
+        let needed = amount
+            .checked_add(fee)
+            .ok_or_else(|| EngineError::InvalidParams("amount + fee overflow".to_string()))?;
+        if input_amount < needed {
+            return Err(EngineError::InvalidParams(format!(
+                "input coin has {input_amount} mojos but {needed} needed (amount + fee)"
+            )));
+        }
+        let recipient = Address::decode(req.recipient_address.trim())
+            .map_err(|e| EngineError::InvalidParams(format!("recipient: {e}")))?;
+        let recipient_ph = recipient.puzzle_hash;
+
+        let parent = parse_bytes32(&req.input_coin.parent_coin_info)?;
+        let coin_ph = parse_bytes32(&req.input_coin.puzzle_hash)?;
+        let input = Coin::new(parent, coin_ph, input_amount);
+
+        // 2. Derive the synthetic SK that owns this coin + the change SK
+        let master_sk = self.unlocked_sk(req.fingerprint)?;
+        let input_intermediate = master_to_wallet_unhardened(&master_sk, req.input_coin.derivation_index);
+        let input_synthetic_sk = input_intermediate.derive_synthetic();
+        let input_synthetic_pk = input_synthetic_sk.public_key();
+        let input_derived_ph: Bytes32 = StandardArgs::curry_tree_hash(input_synthetic_pk).into();
+        if input_derived_ph != coin_ph {
+            return Err(EngineError::InvalidParams(format!(
+                "input_coin.derivation_index ({}) doesn't match input_coin.puzzle_hash; \
+                 derived ph is {}",
+                req.input_coin.derivation_index,
+                hex::encode(input_derived_ph)
+            )));
+        }
+
+        let change_intermediate_sk = master_to_wallet_unhardened(&master_sk, req.change_index);
+        let change_synthetic_sk = change_intermediate_sk.derive_synthetic();
+        let change_synthetic_pk = change_synthetic_sk.public_key();
+        let change_ph: Bytes32 = StandardArgs::curry_tree_hash(change_synthetic_pk).into();
+
+        // 3. Build conditions: create_coin (recipient + change) + reserve_fee
+        let change = input_amount - needed;
+        let mut conditions = Conditions::new()
+            .create_coin(recipient_ph, amount, ::chia_wallet_sdk::chia::puzzle_types::Memos::None);
+        if fee > 0 {
+            conditions = conditions.reserve_fee(fee);
+        }
+        if change > 0 {
+            conditions = conditions.create_coin(
+                change_ph,
+                change,
+                ::chia_wallet_sdk::chia::puzzle_types::Memos::None,
+            );
+        }
+
+        // 4. Spend with StandardLayer
+        let mut ctx = SpendContext::new();
+        let standard = StandardLayer::new(input_synthetic_pk);
+        standard
+            .spend(&mut ctx, input, conditions)
+            .map_err(|e| EngineError::Internal(format!("StandardLayer::spend: {e}")))?;
+
+        let coin_spends = ctx.take();
+
+        // 5. Compute required AGG_SIG signatures + sign with the input synthetic SK
+        let constants: &ConsensusConstants = &MAINNET_CONSTANTS;
+        let agg_sig_consts = AggSigConstants::new(constants.agg_sig_me_additional_data);
+        let required = RequiredSignature::from_coin_spends(
+            &mut ctx,
+            &coin_spends,
+            &agg_sig_consts,
+        )
+        .map_err(|e| EngineError::Internal(format!("required_signatures: {e}")))?;
+
+        let mut aggregated = Signature::default();
+        for req_sig in required {
+            match req_sig {
+                RequiredSignature::Bls(RequiredBlsSignature {
+                    public_key,
+                    raw_message,
+                    appended_info,
+                    domain_string,
+                }) => {
+                    if public_key != input_synthetic_pk {
+                        return Err(EngineError::Internal(format!(
+                            "unexpected required signature for pubkey {}",
+                            hex::encode(public_key.to_bytes())
+                        )));
+                    }
+                    let mut msg = raw_message.to_vec();
+                    msg.extend_from_slice(&appended_info);
+                    if let Some(domain) = domain_string {
+                        msg.extend_from_slice(&domain);
+                    }
+                    aggregated.aggregate(&sign(&input_synthetic_sk, &msg));
+                }
+                RequiredSignature::Secp(_) => {
+                    return Err(EngineError::Internal(
+                        "SECP signatures not supported in send_xch".to_string(),
+                    ));
+                }
+            }
+        }
+        let bundle = SpendBundle::new(coin_spends.clone(), aggregated);
+
+        // 6. Push (unless dry-run)
+        let mut status = "DRY_RUN".to_string();
+        let mut error: Option<String> = None;
+        if req.broadcast {
+            let client = make_client(req.endpoint.as_deref());
+            let res = client
+                .push_tx(bundle.clone())
+                .await
+                .map_err(|e| EngineError::Internal(format!("push_tx: {e}")))?;
+            status = res.status;
+            error = res.error;
+        }
+
+        let tx_id = bundle.name();
+        Ok(serde_json::json!({
+            "tx_id": format!("0x{}", hex::encode(tx_id)),
+            "status": status,
+            "error": error,
+            "spend_bundle": {
+                "coin_spends": coin_spends.iter().map(serialize_coin_spend).collect::<Vec<_>>(),
+                "aggregated_signature": format!("0x{}", hex::encode(bundle.aggregated_signature.to_bytes())),
+            },
+            "change_mojos": change.to_string(),
+            "testnet": req.testnet,
+        })
+        .to_string())
     }
 
     /// Incremental sync of a list of puzzle_hashes against coinset.org.
@@ -1090,6 +1311,18 @@ fn parse_bytes32(s: &str) -> Result<Bytes32, EngineError> {
         .try_into()
         .map_err(|_| EngineError::InvalidParams("expected 32 bytes".to_string()))?;
     Ok(Bytes32::from(arr))
+}
+
+fn serialize_coin_spend(cs: &CoinSpend) -> serde_json::Value {
+    serde_json::json!({
+        "coin": {
+            "parent_coin_info": format!("0x{}", hex::encode(cs.coin.parent_coin_info)),
+            "puzzle_hash": format!("0x{}", hex::encode(cs.coin.puzzle_hash)),
+            "amount": cs.coin.amount.to_string(),
+        },
+        "puzzle_reveal": format!("0x{}", hex::encode(cs.puzzle_reveal.as_ref())),
+        "solution": format!("0x{}", hex::encode(cs.solution.as_ref())),
+    })
 }
 
 fn serialize_coin_record(r: chia_wallet_sdk::coinset::CoinRecord) -> serde_json::Value {
