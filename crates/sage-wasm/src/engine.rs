@@ -140,9 +140,194 @@ impl SageEngine {
             "check_coins_spent" => self.check_coins_spent(params_json).await,
             "send_xch" => self.send_xch(params_json).await,
             "scan_cats" => self.scan_cats(params_json).await,
+            "scan_nfts" => self.scan_nfts(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
+    }
+
+    /// Discover NFT receipts by hint matching + parse with chia-sdk-driver.
+    ///
+    /// Mirrors `scan_cats`. NFTs are singletons; when one is transferred to
+    /// the wallet the on-chain coin carries `hint = inner_ph` (the wallet's
+    /// p2_puzzle_hash). We resolve to the NFT primitive via `Nft::parse_child`
+    /// on the parent spend so we can extract launcher_id, metadata (URIs +
+    /// edition), current_owner DID, royalty.
+    ///
+    /// Params: `{ ("fingerprint" | "master_public_key"),
+    ///            "start"?, "count"?, "testnet"?, "endpoint"? }`
+    ///
+    /// Returns: `{ "nfts": [{ launcher_id, coin_id, parent_coin_info,
+    ///   puzzle_hash, amount, metadata: { edition_number, edition_total,
+    ///   data_uris, metadata_uris, license_uris, data_hash, metadata_hash,
+    ///   license_hash }, current_owner_did, royalty_puzzle_hash,
+    ///   royalty_basis_points, p2_puzzle_hash, confirmed_block_index,
+    ///   spent }] }`.
+    async fn scan_nfts(&self, params_json: &str) -> Result<String, EngineError> {
+        use chia_wallet_sdk::{
+            chia::puzzle_types::nft::NftMetadata,
+            clvm_traits::FromClvm,
+            clvmr::serde::node_from_bytes,
+            driver::{Nft, Puzzle, SpendContext},
+        };
+
+        #[derive(Deserialize)]
+        struct Req {
+            #[serde(default)]
+            fingerprint: Option<u32>,
+            #[serde(default)]
+            master_public_key: Option<String>,
+            #[serde(default)]
+            start: u32,
+            #[serde(default = "default_nft_count")]
+            count: u32,
+            #[serde(default)]
+            testnet: bool,
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        fn default_nft_count() -> u32 {
+            50
+        }
+
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        if req.count == 0 || req.count > 200 {
+            return Err(EngineError::InvalidParams(format!(
+                "count must be 1..=200, got {}",
+                req.count
+            )));
+        }
+        let master_pk =
+            self.resolve_master_pk(req.fingerprint, req.master_public_key.as_deref())?;
+
+        // Inner puzzle hashes — same set used for XCH/CAT detection.
+        let mut inner_phs: Vec<Bytes32> = Vec::with_capacity(req.count as usize);
+        for i in 0..req.count {
+            let idx = req.start + i;
+            let intermediate_pk = master_to_wallet_unhardened(&master_pk, idx);
+            let synthetic_pk = intermediate_pk.derive_synthetic();
+            let inner_ph: Bytes32 = StandardArgs::curry_tree_hash(synthetic_pk).into();
+            inner_phs.push(inner_ph);
+        }
+        let inner_phs_set: std::collections::HashSet<Bytes32> =
+            inner_phs.iter().copied().collect();
+
+        let client = make_client(req.endpoint.as_deref());
+
+        // 1. For each inner_ph, scan hints for incoming NFTs.
+        //    Filter out coins whose puzzle_hash IS one of our PHs (those
+        //    are XCH receives, not NFTs).
+        let mut candidates = Vec::new();
+        for hint in &inner_phs {
+            let res = client
+                .get_coin_records_by_hint(*hint, None, None, Some(true))
+                .await
+                .map_err(|e| EngineError::Internal(format!("coinset hint: {e}")))?;
+            for r in res.coin_records.unwrap_or_default() {
+                if inner_phs_set.contains(&r.coin.puzzle_hash) {
+                    continue;
+                }
+                candidates.push((*hint, r));
+            }
+        }
+
+        // 2. For each candidate, fetch the parent's puzzle+solution and try
+        //    Nft::parse_child. Skip ones that don't parse (those will be
+        //    handled by scan_cats / scan_dids).
+        let mut nfts: Vec<serde_json::Value> = Vec::new();
+
+        for (hint, rec) in &candidates {
+            let parent_id = rec.coin.parent_coin_info;
+            let parent_rec = match client.get_coin_record_by_name(parent_id).await {
+                Ok(r) => r.coin_record,
+                Err(_) => continue,
+            };
+            let Some(parent_rec) = parent_rec else {
+                continue;
+            };
+            if !parent_rec.spent {
+                continue;
+            }
+            let spend = match client
+                .get_puzzle_and_solution(parent_id, Some(parent_rec.spent_block_index))
+                .await
+            {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let Some(coin_spend) = spend.coin_solution else {
+                continue;
+            };
+
+            let mut ctx = SpendContext::new();
+            let puzzle_ptr =
+                match node_from_bytes(&mut *ctx, coin_spend.puzzle_reveal.as_ref()) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+            let solution_ptr =
+                match node_from_bytes(&mut *ctx, coin_spend.solution.as_ref()) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+            let parent_puzzle = Puzzle::parse(&ctx, puzzle_ptr);
+            let nft = match Nft::parse_child(
+                &mut *ctx,
+                coin_spend.coin,
+                parent_puzzle,
+                solution_ptr,
+            ) {
+                Ok(Some(n)) => n,
+                _ => continue,
+            };
+
+            // Match on coin_id — Nft::parse_child returns one child but its
+            // coin should be the one we're looking at.
+            if nft.coin.coin_id() != rec.coin.coin_id() {
+                continue;
+            }
+
+            // Decode metadata via NftMetadata::from_clvm.
+            let metadata_json = match NftMetadata::from_clvm(&*ctx, nft.info.metadata.ptr()) {
+                Ok(md) => serde_json::json!({
+                    "edition_number": md.edition_number,
+                    "edition_total": md.edition_total,
+                    "data_uris": md.data_uris,
+                    "data_hash": md.data_hash.map(|h| format!("0x{}", hex::encode(h))),
+                    "metadata_uris": md.metadata_uris,
+                    "metadata_hash": md.metadata_hash.map(|h| format!("0x{}", hex::encode(h))),
+                    "license_uris": md.license_uris,
+                    "license_hash": md.license_hash.map(|h| format!("0x{}", hex::encode(h))),
+                }),
+                Err(_) => serde_json::json!({}),
+            };
+
+            nfts.push(serde_json::json!({
+                "launcher_id": format!("0x{}", hex::encode(nft.info.launcher_id)),
+                "coin_id": format!("0x{}", hex::encode(nft.coin.coin_id())),
+                "parent_coin_info": format!("0x{}", hex::encode(rec.coin.parent_coin_info)),
+                "puzzle_hash": format!("0x{}", hex::encode(rec.coin.puzzle_hash)),
+                "amount": rec.coin.amount.to_string(),
+                "metadata": metadata_json,
+                "metadata_updater_puzzle_hash": format!("0x{}", hex::encode(nft.info.metadata_updater_puzzle_hash)),
+                "current_owner_did": nft.info.current_owner.map(|d| format!("0x{}", hex::encode(d))),
+                "royalty_puzzle_hash": format!("0x{}", hex::encode(nft.info.royalty_puzzle_hash)),
+                "royalty_basis_points": nft.info.royalty_basis_points,
+                "p2_puzzle_hash": format!("0x{}", hex::encode(nft.info.p2_puzzle_hash)),
+                "hint": format!("0x{}", hex::encode(hint)),
+                "confirmed_block_index": rec.confirmed_block_index,
+                "spent": rec.spent,
+                "spent_block_index": rec.spent_block_index,
+            }));
+        }
+
+        Ok(serde_json::json!({
+            "nfts": nfts,
+            "scanned_inner_hashes": inner_phs.len(),
+            "testnet": req.testnet,
+        })
+        .to_string())
     }
 
     /// Discover CAT receipts across a list of inner puzzle hashes (the
