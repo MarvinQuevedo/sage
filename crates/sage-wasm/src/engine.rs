@@ -87,9 +87,118 @@ impl SageEngine {
             "sign_message" => self.sign_message(params_json).await,
             "verify_signature" => self.verify_signature(params_json).await,
             "sync_tick" => self.sync_tick(params_json).await,
+            "get_address_balance" => self.get_address_balance(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
+    }
+
+    /// Fetch the unspent XCH balance held across a range of derived addresses
+    /// by querying coinset.org directly. No local storage needed — perfect
+    /// for showing "real" balances before the storage bridge ships.
+    ///
+    /// Params:
+    /// `{ "fingerprint": N, "start": K, "count": M, "testnet": bool,
+    ///    "endpoint"?: "mainnet" | "testnet11" | "<url>" }`
+    ///
+    /// Returns:
+    /// `{ "total_unspent_mojos": "<u128>", "total_unspent_xch": "<decimal>",
+    ///    "unspent_coin_count": N, "addresses": [{index, puzzle_hash,
+    ///    address, unspent_mojos: "<u128>", unspent_count}] }`
+    async fn get_address_balance(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            fingerprint: u32,
+            #[serde(default)]
+            start: u32,
+            #[serde(default = "default_balance_count")]
+            count: u32,
+            #[serde(default)]
+            testnet: bool,
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        fn default_balance_count() -> u32 {
+            20
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        if req.count == 0 || req.count > 500 {
+            return Err(EngineError::InvalidParams(format!(
+                "count must be 1..=500, got {}",
+                req.count
+            )));
+        }
+
+        let master_pk = self.unlocked_sk(req.fingerprint)?.public_key();
+        let prefix = if req.testnet { "txch" } else { "xch" };
+
+        // Build the puzzle-hash list + address list in parallel arrays
+        let mut puzzle_hashes: Vec<Bytes32> = Vec::with_capacity(req.count as usize);
+        let mut address_meta = Vec::with_capacity(req.count as usize);
+        for i in 0..req.count {
+            let idx = req.start + i;
+            let intermediate_pk = master_to_wallet_unhardened(&master_pk, idx);
+            let synthetic_pk = intermediate_pk.derive_synthetic();
+            let puzzle_hash: Bytes32 = StandardArgs::curry_tree_hash(synthetic_pk).into();
+            let address = Address::new(puzzle_hash, prefix.to_string())
+                .encode()
+                .map_err(|e| EngineError::Internal(format!("bech32m: {e}")))?;
+            puzzle_hashes.push(puzzle_hash);
+            address_meta.push((idx, puzzle_hash, address));
+        }
+
+        let client = match req.endpoint.as_deref() {
+            None | Some("mainnet") => CoinsetClient::mainnet(),
+            Some("testnet11") => CoinsetClient::testnet11(),
+            Some(url) => CoinsetClient::new(url.to_string()),
+        };
+
+        // Batch: coinset accepts a list, returns coin_records for all of them.
+        // Filter to unspent (spent_block_index == 0).
+        let res = client
+            .get_coin_records_by_puzzle_hashes(puzzle_hashes.clone(), None, None, Some(false))
+            .await
+            .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+        let records = res.coin_records.unwrap_or_default();
+
+        // Bucket by puzzle_hash so we can attribute per-address.
+        let mut per_ph: std::collections::HashMap<Bytes32, (u128, u32)> =
+            std::collections::HashMap::with_capacity(req.count as usize);
+        let mut total_mojos: u128 = 0;
+        let mut total_count: u32 = 0;
+        for r in records {
+            if r.spent {
+                continue;
+            }
+            let entry = per_ph.entry(r.coin.puzzle_hash).or_insert((0, 0));
+            entry.0 = entry.0.saturating_add(u128::from(r.coin.amount));
+            entry.1 = entry.1.saturating_add(1);
+            total_mojos = total_mojos.saturating_add(u128::from(r.coin.amount));
+            total_count = total_count.saturating_add(1);
+        }
+
+        let addresses: Vec<_> = address_meta
+            .into_iter()
+            .map(|(idx, ph, addr)| {
+                let (m, c) = per_ph.get(&ph).copied().unwrap_or((0, 0));
+                serde_json::json!({
+                    "index": idx,
+                    "puzzle_hash": format!("0x{}", hex::encode(ph)),
+                    "address": addr,
+                    "unspent_mojos": m.to_string(),
+                    "unspent_count": c,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::json!({
+            "total_unspent_mojos": total_mojos.to_string(),
+            "total_unspent_xch": format_mojos_as_xch(total_mojos),
+            "unspent_coin_count": total_count,
+            "addresses": addresses,
+        })
+        .to_string())
     }
 
     /// Check whether a BIP-39 phrase parses + has a valid checksum.
@@ -549,6 +658,22 @@ impl SageEngine {
         })
         .to_string())
     }
+}
+
+/// Render a mojos amount (12 decimals) as a fixed-point XCH string with
+/// trailing zeros trimmed but at least four decimals shown ("0.0000").
+fn format_mojos_as_xch(mojos: u128) -> String {
+    const SCALE: u128 = 1_000_000_000_000;
+    let whole = mojos / SCALE;
+    let frac = mojos % SCALE;
+    let frac_str = format!("{frac:012}");
+    let trimmed = frac_str.trim_end_matches('0');
+    let display = if trimmed.len() < 4 {
+        format!("{whole}.{:0<4}", trimmed)
+    } else {
+        format!("{whole}.{trimmed}")
+    };
+    display
 }
 
 #[derive(Debug, Serialize, Deserialize)]
