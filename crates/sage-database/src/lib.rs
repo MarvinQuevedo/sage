@@ -1,25 +1,37 @@
+#[cfg(feature = "sqlite")]
 mod maintenance;
 mod serialized_primitives;
+#[cfg(feature = "sqlite")]
 mod tables;
+#[cfg(feature = "sqlite")]
 mod utils;
 
+#[cfg(feature = "sqlite")]
 pub use maintenance::*;
 pub use serialized_primitives::*;
+#[cfg(feature = "sqlite")]
 pub use tables::*;
 
+#[cfg(feature = "sqlite")]
 pub(crate) use utils::*;
 
 use std::num::TryFromIntError;
 
+#[cfg(feature = "sqlite")]
 use sqlx::{Sqlite, SqlitePool, Transaction as SqliteTransaction};
 use thiserror::Error;
+#[cfg(feature = "sqlite")]
 use tracing::info;
 
+// ─── SQLite-backed implementation ──────────────────────────────────────────
+
+#[cfg(feature = "sqlite")]
 #[derive(Debug, Clone)]
 pub struct Database {
     pub(crate) pool: SqlitePool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Database {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
@@ -52,11 +64,13 @@ impl Database {
     }
 }
 
+#[cfg(feature = "sqlite")]
 #[derive(Debug)]
 pub struct DatabaseTx<'a> {
     pub(crate) tx: SqliteTransaction<'a, Sqlite>,
 }
 
+#[cfg(feature = "sqlite")]
 impl<'a> DatabaseTx<'a> {
     pub fn new(tx: SqliteTransaction<'a, Sqlite>) -> Self {
         Self { tx }
@@ -87,8 +101,30 @@ impl<'a> DatabaseTx<'a> {
     }
 }
 
+// ─── Stub implementation (no-sqlite) ───────────────────────────────────────
+//
+// When the `sqlite` feature is off (wasm32 builds use this), `Database` and
+// `DatabaseTx` exist as opaque types whose methods are not yet wired. This
+// keeps the public type names available to consumers (sage-wallet, etc.) so
+// they can be plumbed through; the methods themselves will be implemented as
+// JS-callback shims in a follow-up commit (IndexedDB-backed storage on the
+// browser side).
+
+#[cfg(not(feature = "sqlite"))]
+#[derive(Debug, Clone, Default)]
+pub struct Database {
+    _private: (),
+}
+
+#[cfg(not(feature = "sqlite"))]
+#[derive(Debug)]
+pub struct DatabaseTx<'a> {
+    _private: core::marker::PhantomData<&'a ()>,
+}
+
 #[derive(Debug, Error)]
 pub enum DatabaseError {
+    #[cfg(feature = "sqlite")]
     #[error("SQLx error: {0}")]
     Sqlx(#[from] sqlx::Error),
 
@@ -112,6 +148,10 @@ pub enum DatabaseError {
 
     #[error("Public key not found for puzzle hash")]
     PublicKeyNotFound,
+
+    #[cfg(not(feature = "sqlite"))]
+    #[error("Storage backend not wired (no-sqlite stub)")]
+    NotImplemented,
 }
 
 pub(crate) type Result<T> = std::result::Result<T, DatabaseError>;

@@ -14,9 +14,17 @@ categories = { workspace = true }
 [lints]
 workspace = true
 
+[features]
+# `sqlite` enables the SQLite-backed Storage implementation via sqlx. This
+# is the default for desktop/mobile targets. Disabling it strips all sqlx /
+# libsqlite3-sys code so the crate can compile to wasm32-unknown-unknown,
+# where storage is provided by the host via callbacks (IndexedDB).
+default = ["sqlite"]
+sqlite = ["dep:sqlx"]
+
 [dependencies]
 chia-wallet-sdk = { workspace = true }
-sqlx = { workspace = true, features = ["sqlite"] }
+sqlx = { workspace = true, features = ["sqlite"], optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 hex = { workspace = true }

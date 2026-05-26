@@ -1,6 +1,7 @@
 use chia_wallet_sdk::prelude::*;
 use thiserror::Error;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::ThumbnailError;
 
 #[derive(Debug, Error)]
@@ -20,6 +21,7 @@ pub enum UriError {
     #[error("No URIs provided")]
     NoUris,
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[error("Failed to create thumbnail: {0}")]
     Thumbnail(#[from] ThumbnailError),
 }

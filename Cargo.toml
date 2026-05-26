@@ -52,7 +52,7 @@ sage-api = { path = "./crates/sage-api" }
 sage-api-macro = { path = "./crates/sage-api/macro" }
 sage-client = { path = "./crates/sage-client" }
 sage-config = { path = "./crates/sage-config" }
-sage-database = { path = "./crates/sage-database" }
+sage-database = { path = "./crates/sage-database", default-features = false }
 sage-keychain = { path = "./crates/sage-keychain" }
 sage-wallet = { path = "./crates/sage-wallet" }
 sage-assets = { path = "./crates/sage-assets" }

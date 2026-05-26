@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
 use chia_wallet_sdk::{chia::sha2::Sha256, prelude::*};
@@ -5,12 +6,20 @@ use futures_lite::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use mime_sniffer::MimeTypeSniffer;
 use reqwest::{StatusCode, header::CONTENT_TYPE};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::spawn_blocking;
 use tracing::debug;
 
 use crate::UriError;
 
+#[cfg(not(target_arch = "wasm32"))]
 use super::{Thumbnail, thumbnail as make_thumbnail};
+
+/// On wasm32 the host handles thumbnail generation (Canvas / OffscreenCanvas),
+/// so the Rust-side `Thumbnail` type is just a stub.
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone)]
+pub struct Thumbnail;
 
 #[derive(Debug, Clone)]
 pub struct Data {
@@ -56,6 +65,7 @@ pub async fn fetch_uri(uri: String, testnet: bool) -> Result<Data, UriError> {
         }
     };
 
+    #[cfg(not(target_arch = "wasm32"))]
     if thumbnail.is_none() {
         let start = Instant::now();
 
@@ -167,5 +177,18 @@ pub async fn mintgarden_thumbnail(
 
     let bytes = response.bytes().await?;
 
-    Ok(make_thumbnail(&bytes, "image/webp")?)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = bytes;
+        Ok(make_thumbnail(&bytes, "image/webp")?)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Browser side handles thumbnail decoding via Canvas/OffscreenCanvas.
+        // We surface the raw bytes via the next call site; for now signal "no
+        // server-side thumbnail" so the host knows it must decode itself.
+        let _ = bytes;
+        Ok(None)
+    }
 }
