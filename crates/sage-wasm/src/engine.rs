@@ -79,15 +79,85 @@ impl SageEngine {
             "derive_addresses" => self.derive_addresses(params_json).await,
             "decode_address" => self.decode_address(params_json).await,
             "generate_mnemonic" => self.generate_mnemonic(params_json).await,
+            "validate_mnemonic" => self.validate_mnemonic(params_json).await,
             "import_mnemonic" => self.import_mnemonic(params_json).await,
             "unlock_keychain" => self.unlock_keychain(params_json).await,
             "lock_keychain" => self.lock_keychain(params_json).await,
             "is_unlocked" => self.is_unlocked(params_json).await,
             "sign_message" => self.sign_message(params_json).await,
+            "verify_signature" => self.verify_signature(params_json).await,
             "sync_tick" => self.sync_tick(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
+    }
+
+    /// Check whether a BIP-39 phrase parses + has a valid checksum.
+    ///
+    /// Params: `{ "mnemonic": "..." }`.
+    /// Returns: `{ "valid": bool, "word_count": N, "error"?: "..." }`.
+    async fn validate_mnemonic(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            mnemonic: String,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        let trimmed = req.mnemonic.trim();
+        let word_count = trimmed.split_whitespace().count();
+        match Mnemonic::parse(trimmed) {
+            Ok(_) => Ok(serde_json::json!({
+                "valid": true,
+                "word_count": word_count,
+            })
+            .to_string()),
+            Err(e) => Ok(serde_json::json!({
+                "valid": false,
+                "word_count": word_count,
+                "error": e.to_string(),
+            })
+            .to_string()),
+        }
+    }
+
+    /// Verify a BLS signature against a message + public key.
+    /// Useful for dApp sign-in flows (verifyMessage) and for popup smoke
+    /// tests of sign_message.
+    ///
+    /// Params: `{ "message": hex, "public_key": hex, "signature": hex }`.
+    /// Returns: `{ "valid": bool }`.
+    async fn verify_signature(&self, params_json: &str) -> Result<String, EngineError> {
+        use chia_wallet_sdk::chia::bls::verify;
+        #[derive(Deserialize)]
+        struct Req {
+            message: String,
+            public_key: String,
+            signature: String,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        let msg = hex::decode(req.message.trim_start_matches("0x"))
+            .map_err(|e| EngineError::InvalidParams(format!("message hex: {e}")))?;
+        let pk_bytes = hex::decode(req.public_key.trim_start_matches("0x"))
+            .map_err(|e| EngineError::InvalidParams(format!("pk hex: {e}")))?;
+        let sig_bytes = hex::decode(req.signature.trim_start_matches("0x"))
+            .map_err(|e| EngineError::InvalidParams(format!("sig hex: {e}")))?;
+        let pk = PublicKey::from_bytes(
+            pk_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| EngineError::InvalidParams("pk must be 48 bytes".to_string()))?,
+        )
+        .map_err(|e| EngineError::InvalidParams(format!("pk: {e}")))?;
+        let sig = Signature::from_bytes(
+            sig_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| EngineError::InvalidParams("sig must be 96 bytes".to_string()))?,
+        )
+        .map_err(|e| EngineError::InvalidParams(format!("sig: {e}")))?;
+        let valid = verify(&sig, &pk, &msg);
+        Ok(serde_json::json!({ "valid": valid }).to_string())
     }
 
     /// Bulk-derive a range of addresses for the receive screen.
