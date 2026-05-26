@@ -1,17 +1,23 @@
-//! The actual Sage engine — boots and dispatches.
+//! The actual Sage engine — boots, dispatches, and holds the unlocked SK.
 //!
-//! Today the dispatch is intentionally narrow:
+//! Lifecycle:
 //! - `version` / `ping` work without any state.
-//! - `derive_address` works from a seed phrase + index, no DB needed.
-//! - Anything that needs persistent state returns `NotImplemented` until
-//!   the JS-callback storage layer lands.
+//! - `generate_mnemonic` / `import_mnemonic` are stateless (no SK yet).
+//! - `unlock_keychain` populates the in-memory SK cache for the unlocked
+//!   fingerprint. Subsequent `derive_address` / `sign_message` calls use
+//!   that cached SK without needing the password again.
+//! - `lock_keychain` clears the cache.
+//!
+//! Anything that needs persistent on-chain state (sync, coin queries)
+//! returns `NotImplemented` until the storage bridge is wired.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use bip39::Mnemonic;
 use chia_wallet_sdk::{
     chia::{
-        bls::{master_to_wallet_unhardened, PublicKey, SecretKey},
+        bls::{master_to_wallet_unhardened, PublicKey, SecretKey, Signature, sign},
         puzzle_types::{standard::StandardArgs, DeriveSynthetic},
     },
     prelude::*,
@@ -23,10 +29,14 @@ use wasm_bindgen::JsValue;
 
 use crate::{storage_bridge::JsStorage, EngineError};
 
-/// Engine state. Cheap to clone (`Arc`-wrapped storage handle).
+/// Engine state. Cheap to clone (`Arc`-wrapped storage + key cache).
 #[derive(Clone)]
 pub struct SageEngine {
     storage: Arc<JsStorage>,
+    /// Master secret keys per fingerprint, populated by `unlock_keychain`.
+    /// In WASM/browser this is single-threaded so the Mutex never contends;
+    /// it gives us interior mutability + `Clone` for the engine struct.
+    unlocked: Arc<Mutex<HashMap<u32, SecretKey>>>,
 }
 
 impl SageEngine {
@@ -34,7 +44,24 @@ impl SageEngine {
         let storage = JsStorage::from_js(storage_callbacks)?;
         Ok(Self {
             storage: Arc::new(storage),
+            unlocked: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// Look up the cached SK for `fingerprint`, returning a fresh clone.
+    fn unlocked_sk(&self, fingerprint: u32) -> Result<SecretKey, EngineError> {
+        let guard = self
+            .unlocked
+            .lock()
+            .map_err(|_| EngineError::Internal("unlocked-cache mutex poisoned".to_string()))?;
+        guard
+            .get(&fingerprint)
+            .cloned()
+            .ok_or_else(|| {
+                EngineError::InvalidParams(format!(
+                    "fingerprint {fingerprint} is locked — call unlock_keychain first"
+                ))
+            })
     }
 
     pub async fn dispatch(&self, method: &str, params_json: &str) -> Result<String, EngineError> {
@@ -51,6 +78,9 @@ impl SageEngine {
             "generate_mnemonic" => self.generate_mnemonic(params_json).await,
             "import_mnemonic" => self.import_mnemonic(params_json).await,
             "unlock_keychain" => self.unlock_keychain(params_json).await,
+            "lock_keychain" => self.lock_keychain(params_json).await,
+            "is_unlocked" => self.is_unlocked(params_json).await,
+            "sign_message" => self.sign_message(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
@@ -185,13 +215,23 @@ impl SageEngine {
                 ))
             })?;
 
-        let (mnemonic, _sk) = keychain
+        let (mnemonic, sk) = keychain
             .extract_secrets(req.fingerprint, req.password.as_bytes())
             .map_err(|_e| EngineError::InvalidParams("wrong password".to_string()))?;
 
         let mnemonic_str = mnemonic
             .map(|m| m.to_string())
             .ok_or_else(|| EngineError::Internal("no mnemonic stored".to_string()))?;
+
+        // Cache the master SK so subsequent derive/sign calls don't need the
+        // password again for the rest of this engine's lifetime.
+        if let Some(sk) = sk {
+            let mut guard = self
+                .unlocked
+                .lock()
+                .map_err(|_| EngineError::Internal("unlocked-cache mutex poisoned".to_string()))?;
+            guard.insert(req.fingerprint, sk);
+        }
 
         Ok(serde_json::json!({
             "fingerprint": req.fingerprint,
@@ -201,20 +241,31 @@ impl SageEngine {
         .to_string())
     }
 
-    /// Derive a Chia address from a BIP-39 mnemonic + derivation index.
-    /// Pure crypto — no storage involved. Acts as the smoke test that BLS,
-    /// puzzle derivation, and bech32m all work in WASM.
+    /// Derive a Chia address.
+    ///
+    /// Two modes:
+    /// * `{ "fingerprint": N, "index": K, "testnet": bool }` — uses the
+    ///   unlocked SK cached at `unlock_keychain` time. Preferred.
+    /// * `{ "mnemonic": "...", "index": K, "testnet": bool }` — pure stateless
+    ///   path that re-derives from a mnemonic. Kept for one-off lookups.
     async fn derive_address(&self, params_json: &str) -> Result<String, EngineError> {
         let req: DeriveAddressRequest = serde_json::from_str(params_json)
             .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
 
-        let mnemonic = Mnemonic::parse(req.mnemonic.trim())
-            .map_err(|e| EngineError::InvalidParams(format!("mnemonic: {e}")))?;
-        let seed = mnemonic.to_seed("");
+        let master_pk: PublicKey = if let Some(fp) = req.fingerprint {
+            self.unlocked_sk(fp)?.public_key()
+        } else if let Some(mnemonic_str) = req.mnemonic.as_deref() {
+            let mnemonic = Mnemonic::parse(mnemonic_str.trim())
+                .map_err(|e| EngineError::InvalidParams(format!("mnemonic: {e}")))?;
+            SecretKey::from_seed(&mnemonic.to_seed("")).public_key()
+        } else {
+            return Err(EngineError::InvalidParams(
+                "derive_address requires either `fingerprint` (preferred) or `mnemonic`"
+                    .to_string(),
+            ));
+        };
 
-        let master_sk = SecretKey::from_seed(&seed);
-        let intermediate_pk: PublicKey = master_to_wallet_unhardened(&master_sk.public_key(), 0);
-
+        let intermediate_pk: PublicKey = master_to_wallet_unhardened(&master_pk, req.index);
         let synthetic_pk = intermediate_pk.derive_synthetic();
         let puzzle_hash: Bytes32 = StandardArgs::curry_tree_hash(synthetic_pk).into();
         let prefix = if req.testnet { "txch" } else { "xch" };
@@ -233,11 +284,95 @@ impl SageEngine {
         })
         .to_string())
     }
+
+    /// Clear the cached SK for one fingerprint (or all if `fingerprint`
+    /// omitted). Called when the user locks the popup.
+    async fn lock_keychain(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize, Default)]
+        struct Req {
+            fingerprint: Option<u32>,
+        }
+        let req: Req = if params_json.trim().is_empty() || params_json == "{}" {
+            Req::default()
+        } else {
+            serde_json::from_str(params_json)
+                .map_err(|e| EngineError::InvalidParams(e.to_string()))?
+        };
+
+        let mut guard = self
+            .unlocked
+            .lock()
+            .map_err(|_| EngineError::Internal("unlocked-cache mutex poisoned".to_string()))?;
+        match req.fingerprint {
+            Some(fp) => {
+                guard.remove(&fp);
+            }
+            None => guard.clear(),
+        }
+
+        Ok(serde_json::json!({ "locked": true }).to_string())
+    }
+
+    /// Report whether a given fingerprint is currently unlocked in this
+    /// engine instance.
+    async fn is_unlocked(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            fingerprint: u32,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        let guard = self
+            .unlocked
+            .lock()
+            .map_err(|_| EngineError::Internal("unlocked-cache mutex poisoned".to_string()))?;
+        Ok(serde_json::json!({
+            "fingerprint": req.fingerprint,
+            "unlocked": guard.contains_key(&req.fingerprint),
+        })
+        .to_string())
+    }
+
+    /// BLS-sign a message with a derived key.
+    ///
+    /// `message` is hex (with or without leading `0x`). The signing key is
+    /// the synthetic key at `index` for the unlocked fingerprint — i.e. the
+    /// same key that owns the address at that index. Uses the standard
+    /// BLS augmented scheme (`sign`).
+    async fn sign_message(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            fingerprint: u32,
+            #[serde(default)]
+            index: u32,
+            message: String,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+
+        let master_sk = self.unlocked_sk(req.fingerprint)?;
+        let intermediate_sk = master_to_wallet_unhardened(&master_sk, req.index);
+        let synthetic_sk = intermediate_sk.derive_synthetic();
+
+        let bytes = hex::decode(req.message.trim_start_matches("0x"))
+            .map_err(|e| EngineError::InvalidParams(format!("message hex: {e}")))?;
+        let signature: Signature = sign(&synthetic_sk, &bytes);
+
+        Ok(serde_json::json!({
+            "signature": format!("0x{}", hex::encode(signature.to_bytes())),
+            "public_key": format!("0x{}", hex::encode(synthetic_sk.public_key().to_bytes())),
+            "index": req.index,
+        })
+        .to_string())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct DeriveAddressRequest {
-    mnemonic: String,
+    #[serde(default)]
+    fingerprint: Option<u32>,
+    #[serde(default)]
+    mnemonic: Option<String>,
     #[serde(default)]
     index: u32,
     #[serde(default)]
