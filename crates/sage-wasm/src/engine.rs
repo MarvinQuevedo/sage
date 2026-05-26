@@ -50,6 +50,32 @@ impl SageEngine {
     }
 
     /// Look up the cached SK for `fingerprint`, returning a fresh clone.
+    /// Get a master public key either from a cached unlocked SK (by
+    /// fingerprint) or from a directly-passed hex master_public_key.
+    /// Used by stateless read methods that need to derive puzzle hashes
+    /// without requiring the wallet to be unlocked first.
+    fn resolve_master_pk(
+        &self,
+        fingerprint: Option<u32>,
+        master_public_key_hex: Option<&str>,
+    ) -> Result<PublicKey, EngineError> {
+        if let Some(hex_str) = master_public_key_hex {
+            let bytes = hex::decode(hex_str.trim_start_matches("0x"))
+                .map_err(|e| EngineError::InvalidParams(format!("master_public_key hex: {e}")))?;
+            let arr: [u8; 48] = bytes.as_slice().try_into().map_err(|_| {
+                EngineError::InvalidParams("master_public_key must be 48 bytes (G1)".to_string())
+            })?;
+            return PublicKey::from_bytes(&arr)
+                .map_err(|e| EngineError::InvalidParams(format!("master_public_key: {e}")));
+        }
+        if let Some(fp) = fingerprint {
+            return Ok(self.unlocked_sk(fp)?.public_key());
+        }
+        Err(EngineError::InvalidParams(
+            "need `fingerprint` (unlocked) or `master_public_key`".to_string(),
+        ))
+    }
+
     fn unlocked_sk(&self, fingerprint: u32) -> Result<SecretKey, EngineError> {
         let guard = self
             .unlocked
@@ -611,8 +637,12 @@ impl SageEngine {
     /// by querying coinset.org directly. No local storage needed — perfect
     /// for showing "real" balances before the storage bridge ships.
     ///
+    /// Accepts EITHER `fingerprint` (cached SK) OR `master_public_key`
+    /// (stateless, works while locked).
+    ///
     /// Params:
-    /// `{ "fingerprint": N, "start": K, "count": M, "testnet": bool,
+    /// `{ ("fingerprint": N | "master_public_key": "0x..."),
+    ///    "start": K, "count": M, "testnet": bool,
     ///    "endpoint"?: "mainnet" | "testnet11" | "<url>" }`
     ///
     /// Returns:
@@ -622,7 +652,10 @@ impl SageEngine {
     async fn get_address_balance(&self, params_json: &str) -> Result<String, EngineError> {
         #[derive(Deserialize)]
         struct Req {
-            fingerprint: u32,
+            #[serde(default)]
+            fingerprint: Option<u32>,
+            #[serde(default)]
+            master_public_key: Option<String>,
             #[serde(default)]
             start: u32,
             #[serde(default = "default_balance_count")]
@@ -644,7 +677,7 @@ impl SageEngine {
             )));
         }
 
-        let master_pk = self.unlocked_sk(req.fingerprint)?.public_key();
+        let master_pk = self.resolve_master_pk(req.fingerprint, req.master_public_key.as_deref())?;
         let prefix = if req.testnet { "txch" } else { "xch" };
 
         // Build the puzzle-hash list + address list in parallel arrays
@@ -916,12 +949,21 @@ impl SageEngine {
 
     /// Bulk-derive a range of addresses for the receive screen.
     ///
-    /// Params: `{ "fingerprint": N, "start": K, "count": M, "testnet": bool }`.
+    /// Accepts EITHER `fingerprint` (uses the cached unlocked SK) OR
+    /// `master_public_key` (stateless — works even when the engine is
+    /// locked, useful for the background sync loop that runs after the SW
+    /// dies and revives).
+    ///
+    /// Params: `{ ("fingerprint": N | "master_public_key": "0x..."),
+    ///            "start": K, "count": M, "testnet": bool }`.
     /// Returns: `{ "addresses": [{ index, address, puzzle_hash, public_key }] }`.
     async fn derive_addresses(&self, params_json: &str) -> Result<String, EngineError> {
         #[derive(Deserialize)]
         struct Req {
-            fingerprint: u32,
+            #[serde(default)]
+            fingerprint: Option<u32>,
+            #[serde(default)]
+            master_public_key: Option<String>,
             #[serde(default)]
             start: u32,
             #[serde(default = "default_count")]
@@ -940,7 +982,7 @@ impl SageEngine {
                 req.count
             )));
         }
-        let master_pk = self.unlocked_sk(req.fingerprint)?.public_key();
+        let master_pk = self.resolve_master_pk(req.fingerprint, req.master_public_key.as_deref())?;
         let prefix = if req.testnet { "txch" } else { "xch" };
         let mut out = Vec::with_capacity(req.count as usize);
         for i in 0..req.count {
