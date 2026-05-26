@@ -1,4 +1,5 @@
 use chia_wallet_sdk::{prelude::*, types::puzzles::P2DelegatedConditionsArgs};
+#[cfg(feature = "sqlite")]
 use sqlx::{SqliteExecutor, query};
 
 use crate::{Convert, Database, DatabaseError, DatabaseTx, Result};

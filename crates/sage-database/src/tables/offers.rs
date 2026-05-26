@@ -1,5 +1,6 @@
 use crate::{Asset, Convert, Database, DatabaseTx, Result};
 use chia_wallet_sdk::prelude::*;
+#[cfg(feature = "sqlite")]
 use sqlx::SqliteExecutor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

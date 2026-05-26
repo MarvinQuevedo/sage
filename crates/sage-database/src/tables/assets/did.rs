@@ -1,4 +1,5 @@
 use chia_wallet_sdk::prelude::*;
+#[cfg(feature = "sqlite")]
 use sqlx::query;
 
 use crate::{Asset, AssetKind, CoinKind, CoinRow, Convert, Database, DatabaseTx, Result};

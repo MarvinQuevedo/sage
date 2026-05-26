@@ -1,3 +1,4 @@
+#[cfg(feature = "sqlite")]
 use sqlx::query;
 
 use crate::{Asset, AssetKind, Convert, Database, Result};
