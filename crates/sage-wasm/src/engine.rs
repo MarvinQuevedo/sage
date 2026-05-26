@@ -118,32 +118,37 @@ impl SageEngine {
         }
     }
 
-    /// Send XCH: build a SpendBundle from a single input coin, sign it, and
-    /// push it via coinset. Multi-coin selection lives on the JS side
+    /// Send XCH: build a SpendBundle from one or more input coins, sign,
+    /// and push via coinset. Multi-coin selection lives on the JS side
     /// (chrome.storage.local["coins.<fp>"]) so the engine stays stateless
-    /// about which coins to pick.
+    /// about which coins to pick — it just trusts the list it's given.
+    ///
+    /// Multi-input pattern: the first coin carries the outputs and asserts
+    /// that every other coin in the bundle is spent in the same block; the
+    /// other coins spend with a single assert_concurrent_spend back to the
+    /// first. Each coin is signed with its own synthetic SK at the matching
+    /// derivation_index.
     ///
     /// Params:
     /// ```
     /// {
     ///   fingerprint: u32,
-    ///   recipient_address: "xch1...",     // bech32m, destination
-    ///   amount_mojos: "1000000000000",    // u64 as string
-    ///   fee_mojos: "0",                    // u64 as string
-    ///   input_coin: {                      // single coin picked by JS
-    ///     parent_coin_info: "0x...",
-    ///     puzzle_hash: "0x...",
-    ///     amount: "5000000000000",
-    ///     derivation_index: 7,             // index whose synthetic pk owns this coin
-    ///   },
-    ///   change_index: 0,                   // derivation index to receive change
+    ///   recipient_address: "xch1...",
+    ///   amount_mojos: "1000000000000",
+    ///   fee_mojos: "0",
+    ///   input_coins: [{ parent_coin_info, puzzle_hash, amount, derivation_index }],
+    ///   change_index: u32,
     ///   testnet: false,
     ///   endpoint?: "mainnet" | "testnet11" | "<url>",
-    ///   broadcast?: true,                  // default true — set false to dry-run
+    ///   broadcast?: true
     /// }
     /// ```
     ///
-    /// Returns: `{ tx_id, status, error?, spend_bundle: { coin_spends, aggregated_signature } }`.
+    /// Backwards-compat: `input_coin` (singular) is still accepted and gets
+    /// wrapped into a 1-element `input_coins`.
+    ///
+    /// Returns: `{ tx_id, status, error?, spend_bundle, change_mojos,
+    ///             input_count, total_input_mojos }`.
     async fn send_xch(&self, params_json: &str) -> Result<String, EngineError> {
         use chia_wallet_sdk::{
             chia::{
@@ -156,7 +161,7 @@ impl SageEngine {
             types::MAINNET_CONSTANTS,
         };
 
-        #[derive(Deserialize)]
+        #[derive(Deserialize, Clone)]
         struct InputCoin {
             parent_coin_info: String,
             puzzle_hash: String,
@@ -170,7 +175,10 @@ impl SageEngine {
             amount_mojos: String,
             #[serde(default = "default_zero_mojos")]
             fee_mojos: String,
-            input_coin: InputCoin,
+            #[serde(default)]
+            input_coin: Option<InputCoin>,
+            #[serde(default)]
+            input_coins: Option<Vec<InputCoin>>,
             #[serde(default)]
             change_index: u32,
             #[serde(default)]
@@ -199,11 +207,6 @@ impl SageEngine {
             .fee_mojos
             .parse()
             .map_err(|_| EngineError::InvalidParams("fee_mojos must be u64".to_string()))?;
-        let input_amount: u64 = req
-            .input_coin
-            .amount
-            .parse()
-            .map_err(|_| EngineError::InvalidParams("input_coin.amount must be u64".to_string()))?;
         if amount == 0 {
             return Err(EngineError::InvalidParams(
                 "amount_mojos must be > 0".to_string(),
@@ -212,64 +215,117 @@ impl SageEngine {
         let needed = amount
             .checked_add(fee)
             .ok_or_else(|| EngineError::InvalidParams("amount + fee overflow".to_string()))?;
-        if input_amount < needed {
+
+        let inputs = req
+            .input_coins
+            .or_else(|| req.input_coin.map(|c| vec![c]))
+            .ok_or_else(|| {
+                EngineError::InvalidParams(
+                    "send_xch needs `input_coins` (or legacy `input_coin`)".to_string(),
+                )
+            })?;
+        if inputs.is_empty() {
+            return Err(EngineError::InvalidParams("input_coins is empty".to_string()));
+        }
+        if inputs.len() > 50 {
             return Err(EngineError::InvalidParams(format!(
-                "input coin has {input_amount} mojos but {needed} needed (amount + fee)"
+                "too many input_coins ({}), max 50 per bundle",
+                inputs.len()
             )));
         }
+
+        // Parse and sum
+        let mut total_input: u64 = 0;
+        let mut parsed: Vec<(Coin, SecretKey, PublicKey, u32)> = Vec::with_capacity(inputs.len());
+        let master_sk = self.unlocked_sk(req.fingerprint)?;
+        for c in &inputs {
+            let amount_u: u64 = c
+                .amount
+                .parse()
+                .map_err(|_| EngineError::InvalidParams("input.amount must be u64".to_string()))?;
+            total_input = total_input
+                .checked_add(amount_u)
+                .ok_or_else(|| EngineError::InvalidParams("input sum overflow".to_string()))?;
+            let parent = parse_bytes32(&c.parent_coin_info)?;
+            let coin_ph = parse_bytes32(&c.puzzle_hash)?;
+            let coin = Coin::new(parent, coin_ph, amount_u);
+            let intermediate = master_to_wallet_unhardened(&master_sk, c.derivation_index);
+            let synthetic_sk = intermediate.derive_synthetic();
+            let synthetic_pk = synthetic_sk.public_key();
+            let derived_ph: Bytes32 = StandardArgs::curry_tree_hash(synthetic_pk).into();
+            if derived_ph != coin_ph {
+                return Err(EngineError::InvalidParams(format!(
+                    "input coin at index {} has puzzle_hash {} but derivation_index {} derives \
+                     to {}",
+                    parsed.len(),
+                    hex::encode(coin_ph),
+                    c.derivation_index,
+                    hex::encode(derived_ph)
+                )));
+            }
+            parsed.push((coin, synthetic_sk, synthetic_pk, c.derivation_index));
+        }
+
+        if total_input < needed {
+            return Err(EngineError::InvalidParams(format!(
+                "input coins sum to {total_input} mojos but {needed} needed (amount + fee)"
+            )));
+        }
+        let change = total_input - needed;
+
         let recipient = Address::decode(req.recipient_address.trim())
             .map_err(|e| EngineError::InvalidParams(format!("recipient: {e}")))?;
         let recipient_ph = recipient.puzzle_hash;
 
-        let parent = parse_bytes32(&req.input_coin.parent_coin_info)?;
-        let coin_ph = parse_bytes32(&req.input_coin.puzzle_hash)?;
-        let input = Coin::new(parent, coin_ph, input_amount);
-
-        // 2. Derive the synthetic SK that owns this coin + the change SK
-        let master_sk = self.unlocked_sk(req.fingerprint)?;
-        let input_intermediate = master_to_wallet_unhardened(&master_sk, req.input_coin.derivation_index);
-        let input_synthetic_sk = input_intermediate.derive_synthetic();
-        let input_synthetic_pk = input_synthetic_sk.public_key();
-        let input_derived_ph: Bytes32 = StandardArgs::curry_tree_hash(input_synthetic_pk).into();
-        if input_derived_ph != coin_ph {
-            return Err(EngineError::InvalidParams(format!(
-                "input_coin.derivation_index ({}) doesn't match input_coin.puzzle_hash; \
-                 derived ph is {}",
-                req.input_coin.derivation_index,
-                hex::encode(input_derived_ph)
-            )));
-        }
-
         let change_intermediate_sk = master_to_wallet_unhardened(&master_sk, req.change_index);
-        let change_synthetic_sk = change_intermediate_sk.derive_synthetic();
-        let change_synthetic_pk = change_synthetic_sk.public_key();
+        let change_synthetic_pk = change_intermediate_sk.derive_synthetic().public_key();
         let change_ph: Bytes32 = StandardArgs::curry_tree_hash(change_synthetic_pk).into();
 
-        // 3. Build conditions: create_coin (recipient + change) + reserve_fee
-        let change = input_amount - needed;
-        let mut conditions = Conditions::new()
-            .create_coin(recipient_ph, amount, ::chia_wallet_sdk::chia::puzzle_types::Memos::None);
+        // 2. Build conditions
+        // First coin: outputs + reserve_fee + assert_concurrent_spend for the rest.
+        // Other coins: assert_concurrent_spend back to the first.
+        let mut ctx = SpendContext::new();
+
+        let (head_coin, head_sk, head_pk, _) = parsed[0].clone();
+        let head_coin_id = head_coin.coin_id();
+
+        let mut head_conditions = Conditions::new()
+            .create_coin(
+                recipient_ph,
+                amount,
+                ::chia_wallet_sdk::chia::puzzle_types::Memos::None,
+            );
         if fee > 0 {
-            conditions = conditions.reserve_fee(fee);
+            head_conditions = head_conditions.reserve_fee(fee);
         }
         if change > 0 {
-            conditions = conditions.create_coin(
+            head_conditions = head_conditions.create_coin(
                 change_ph,
                 change,
                 ::chia_wallet_sdk::chia::puzzle_types::Memos::None,
             );
         }
+        for (other_coin, _, _, _) in parsed.iter().skip(1) {
+            head_conditions = head_conditions.assert_concurrent_spend(other_coin.coin_id());
+        }
 
-        // 4. Spend with StandardLayer
-        let mut ctx = SpendContext::new();
-        let standard = StandardLayer::new(input_synthetic_pk);
-        standard
-            .spend(&mut ctx, input, conditions)
-            .map_err(|e| EngineError::Internal(format!("StandardLayer::spend: {e}")))?;
+        StandardLayer::new(head_pk)
+            .spend(&mut ctx, head_coin, head_conditions)
+            .map_err(|e| EngineError::Internal(format!("StandardLayer::spend head: {e}")))?;
+
+        // Tail coins: just assert_concurrent_spend(head)
+        for (i, (coin, _, pk, _)) in parsed.iter().enumerate().skip(1) {
+            let tail = Conditions::new().assert_concurrent_spend(head_coin_id);
+            StandardLayer::new(*pk)
+                .spend(&mut ctx, *coin, tail)
+                .map_err(|e| {
+                    EngineError::Internal(format!("StandardLayer::spend tail {i}: {e}"))
+                })?;
+        }
 
         let coin_spends = ctx.take();
 
-        // 5. Compute required AGG_SIG signatures + sign with the input synthetic SK
+        // 3. Compute required AGG_SIG signatures + sign with each input's SK
         let constants: &ConsensusConstants = &MAINNET_CONSTANTS;
         let agg_sig_consts = AggSigConstants::new(constants.agg_sig_me_additional_data);
         let required = RequiredSignature::from_coin_spends(
@@ -278,6 +334,14 @@ impl SageEngine {
             &agg_sig_consts,
         )
         .map_err(|e| EngineError::Internal(format!("required_signatures: {e}")))?;
+
+        // Build pk → sk lookup
+        let mut sks_by_pk: std::collections::HashMap<Vec<u8>, SecretKey> =
+            std::collections::HashMap::new();
+        sks_by_pk.insert(head_pk.to_bytes().to_vec(), head_sk);
+        for (_, sk, pk, _) in parsed.iter().skip(1) {
+            sks_by_pk.insert(pk.to_bytes().to_vec(), sk.clone());
+        }
 
         let mut aggregated = Signature::default();
         for req_sig in required {
@@ -288,18 +352,19 @@ impl SageEngine {
                     appended_info,
                     domain_string,
                 }) => {
-                    if public_key != input_synthetic_pk {
-                        return Err(EngineError::Internal(format!(
-                            "unexpected required signature for pubkey {}",
-                            hex::encode(public_key.to_bytes())
-                        )));
-                    }
+                    let pk_bytes = public_key.to_bytes().to_vec();
+                    let sk = sks_by_pk.get(&pk_bytes).ok_or_else(|| {
+                        EngineError::Internal(format!(
+                            "no secret key cached for pubkey {} (not among the input coins)",
+                            hex::encode(&pk_bytes)
+                        ))
+                    })?;
                     let mut msg = raw_message.to_vec();
                     msg.extend_from_slice(&appended_info);
                     if let Some(domain) = domain_string {
                         msg.extend_from_slice(&domain);
                     }
-                    aggregated.aggregate(&sign(&input_synthetic_sk, &msg));
+                    aggregated.aggregate(&sign(sk, &msg));
                 }
                 RequiredSignature::Secp(_) => {
                     return Err(EngineError::Internal(
@@ -333,6 +398,8 @@ impl SageEngine {
                 "aggregated_signature": format!("0x{}", hex::encode(bundle.aggregated_signature.to_bytes())),
             },
             "change_mojos": change.to_string(),
+            "input_count": inputs.len(),
+            "total_input_mojos": total_input.to_string(),
             "testnet": req.testnet,
         })
         .to_string())
