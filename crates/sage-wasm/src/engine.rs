@@ -223,22 +223,20 @@ impl SageEngine {
                 .map_err(|e| EngineError::InvalidParams(e.to_string()))?
         };
 
-        let bits = match req.words {
-            12 => 128,
-            15 => 160,
-            18 => 192,
-            21 => 224,
-            24 => 256,
+        match req.words {
+            12 | 15 | 18 | 21 | 24 => {}
             other => {
                 return Err(EngineError::InvalidParams(format!(
                     "word count must be 12/15/18/21/24, got {other}"
                 )));
             }
-        };
+        }
 
-        let mut entropy = vec![0u8; bits / 8];
-        getrandom::fill(&mut entropy).map_err(|e| EngineError::Internal(e.to_string()))?;
-        let mnemonic = Mnemonic::from_entropy(&entropy)
+        // `bip39::Mnemonic::generate` uses `rand`'s `thread_rng()` under the
+        // hood, which is satisfied by `rand`'s `getrandom` backend selection.
+        // We've already declared the proper getrandom features for wasm32 in
+        // sage-wallet's target-conditional deps; native uses the OS RNG.
+        let mnemonic = Mnemonic::generate(req.words as usize)
             .map_err(|e| EngineError::Internal(e.to_string()))?;
 
         Ok(serde_json::json!({
