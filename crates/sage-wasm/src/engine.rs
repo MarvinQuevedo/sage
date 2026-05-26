@@ -20,6 +20,7 @@ use chia_wallet_sdk::{
         bls::{master_to_wallet_unhardened, PublicKey, SecretKey, Signature, sign},
         puzzle_types::{standard::StandardArgs, DeriveSynthetic},
     },
+    coinset::{ChiaRpcClient, CoinsetClient},
     prelude::*,
     utils::Address,
 };
@@ -75,15 +76,130 @@ impl SageEngine {
             .to_string()),
 
             "derive_address" => self.derive_address(params_json).await,
+            "derive_addresses" => self.derive_addresses(params_json).await,
+            "decode_address" => self.decode_address(params_json).await,
             "generate_mnemonic" => self.generate_mnemonic(params_json).await,
             "import_mnemonic" => self.import_mnemonic(params_json).await,
             "unlock_keychain" => self.unlock_keychain(params_json).await,
             "lock_keychain" => self.lock_keychain(params_json).await,
             "is_unlocked" => self.is_unlocked(params_json).await,
             "sign_message" => self.sign_message(params_json).await,
+            "sync_tick" => self.sync_tick(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
+    }
+
+    /// Bulk-derive a range of addresses for the receive screen.
+    ///
+    /// Params: `{ "fingerprint": N, "start": K, "count": M, "testnet": bool }`.
+    /// Returns: `{ "addresses": [{ index, address, puzzle_hash, public_key }] }`.
+    async fn derive_addresses(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            fingerprint: u32,
+            #[serde(default)]
+            start: u32,
+            #[serde(default = "default_count")]
+            count: u32,
+            #[serde(default)]
+            testnet: bool,
+        }
+        fn default_count() -> u32 {
+            10
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        if req.count == 0 || req.count > 200 {
+            return Err(EngineError::InvalidParams(format!(
+                "count must be 1..=200, got {}",
+                req.count
+            )));
+        }
+        let master_pk = self.unlocked_sk(req.fingerprint)?.public_key();
+        let prefix = if req.testnet { "txch" } else { "xch" };
+        let mut out = Vec::with_capacity(req.count as usize);
+        for i in 0..req.count {
+            let idx = req.start + i;
+            let intermediate_pk = master_to_wallet_unhardened(&master_pk, idx);
+            let synthetic_pk = intermediate_pk.derive_synthetic();
+            let puzzle_hash: Bytes32 = StandardArgs::curry_tree_hash(synthetic_pk).into();
+            let address = Address::new(puzzle_hash, prefix.to_string())
+                .encode()
+                .map_err(|e| EngineError::Internal(format!("bech32m: {e}")))?;
+            out.push(serde_json::json!({
+                "index": idx,
+                "address": address,
+                "puzzle_hash": format!("0x{}", hex::encode(puzzle_hash)),
+                "public_key": format!("0x{}", hex::encode(synthetic_pk.to_bytes())),
+            }));
+        }
+        Ok(serde_json::json!({ "addresses": out }).to_string())
+    }
+
+    /// Parse a bech32m Chia address into its puzzle hash + prefix.
+    ///
+    /// Params: `{ "address": "xch1..." }`.
+    /// Returns: `{ "puzzle_hash": "0x...", "prefix": "xch" | "txch" }`.
+    async fn decode_address(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            address: String,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        let parsed = Address::decode(req.address.trim())
+            .map_err(|e| EngineError::InvalidParams(format!("bech32m: {e}")))?;
+        Ok(serde_json::json!({
+            "puzzle_hash": format!("0x{}", hex::encode(parsed.puzzle_hash)),
+            "prefix": parsed.prefix,
+        })
+        .to_string())
+    }
+
+    /// One sync poll against the configured Chia RPC backend.
+    ///
+    /// Today this is a smoke test: hit `get_blockchain_state` against the
+    /// mainnet coinset.org endpoint and return the current peak height +
+    /// sync mode + network info. Real wallet sync (per-puzzle-hash polling,
+    /// hint walking, mempool watch) will come next on top of this.
+    ///
+    /// Params: `{ "endpoint"?: "mainnet" | "testnet11" | "<url>" }` (default
+    /// mainnet).
+    async fn sync_tick(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize, Default)]
+        struct Req {
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        let req: Req = if params_json.trim().is_empty() || params_json == "{}" {
+            Req::default()
+        } else {
+            serde_json::from_str(params_json)
+                .map_err(|e| EngineError::InvalidParams(e.to_string()))?
+        };
+        let client = match req.endpoint.as_deref() {
+            None | Some("mainnet") => CoinsetClient::mainnet(),
+            Some("testnet11") => CoinsetClient::testnet11(),
+            Some(url) => CoinsetClient::new(url.to_string()),
+        };
+        let state = client
+            .get_blockchain_state()
+            .await
+            .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+        let body = state.blockchain_state.ok_or_else(|| {
+            EngineError::Internal(state.error.unwrap_or_else(|| "empty response".to_string()))
+        })?;
+        Ok(serde_json::json!({
+            "peak_height": body.peak.height,
+            "peak_header_hash": format!("0x{}", hex::encode(body.peak.header_hash)),
+            "synced": body.sync.synced,
+            "sync_mode": body.sync.sync_mode,
+            "mempool_size": body.mempool_size,
+            "mempool_cost": body.mempool_cost,
+            "difficulty": body.difficulty,
+        })
+        .to_string())
     }
 
     /// Generate a new BIP-39 mnemonic.
