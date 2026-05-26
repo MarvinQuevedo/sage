@@ -139,9 +139,230 @@ impl SageEngine {
             "scan_hints" => self.scan_hints(params_json).await,
             "check_coins_spent" => self.check_coins_spent(params_json).await,
             "send_xch" => self.send_xch(params_json).await,
+            "scan_cats" => self.scan_cats(params_json).await,
 
             other => Err(EngineError::NotImplemented(other.to_string())),
         }
+    }
+
+    /// Discover CAT receipts across a list of inner puzzle hashes (the
+    /// wallet's p2 puzzle hashes). When someone sends a CAT to your address,
+    /// the on-chain coin is at the CAT outer puzzle hash with `hint = inner_ph`,
+    /// so we use coinset's `get_coin_records_by_hint` to surface them, then
+    /// fetch the parent spend and let `Cat::parse_children` extract the
+    /// `asset_id` (tail hash).
+    ///
+    /// Params: `{ ("fingerprint": N | "master_public_key": "0x..."),
+    ///            "start": K, "count": M, "endpoint"?: "..." }`
+    ///
+    /// Returns: `{ "cats": [{ "asset_id", "total_unspent_mojos",
+    ///   "unspent_coin_count", "coins": [{ coin_id, parent, ph, amount,
+    ///   inner_puzzle_hash, hint, confirmed_block, spent_block }] }] }`.
+    async fn scan_cats(&self, params_json: &str) -> Result<String, EngineError> {
+        use chia_wallet_sdk::{
+            chia::protocol::Program,
+            clvmr::serde::node_from_bytes,
+            driver::{Cat, Puzzle, SpendContext},
+        };
+
+        #[derive(Deserialize)]
+        struct Req {
+            #[serde(default)]
+            fingerprint: Option<u32>,
+            #[serde(default)]
+            master_public_key: Option<String>,
+            #[serde(default)]
+            start: u32,
+            #[serde(default = "default_cat_count")]
+            count: u32,
+            #[serde(default)]
+            testnet: bool,
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        fn default_cat_count() -> u32 {
+            50
+        }
+
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        if req.count == 0 || req.count > 200 {
+            return Err(EngineError::InvalidParams(format!(
+                "count must be 1..=200, got {}",
+                req.count
+            )));
+        }
+        let master_pk =
+            self.resolve_master_pk(req.fingerprint, req.master_public_key.as_deref())?;
+
+        // 1. Derive the inner puzzle hashes we'll scan as hints.
+        let mut inner_phs: Vec<Bytes32> = Vec::with_capacity(req.count as usize);
+        for i in 0..req.count {
+            let idx = req.start + i;
+            let intermediate_pk = master_to_wallet_unhardened(&master_pk, idx);
+            let synthetic_pk = intermediate_pk.derive_synthetic();
+            let inner_ph: Bytes32 = StandardArgs::curry_tree_hash(synthetic_pk).into();
+            inner_phs.push(inner_ph);
+        }
+        let inner_phs_set: std::collections::HashSet<Bytes32> =
+            inner_phs.iter().copied().collect();
+
+        let client = make_client(req.endpoint.as_deref());
+
+        // 2. For each inner_ph, fetch coins with hint = inner_ph.
+        //    We skip records whose outer puzzle_hash is itself in inner_phs
+        //    (those are XCH receives, already covered by scan_puzzle_hashes).
+        let mut candidates = Vec::new();
+        for hint in &inner_phs {
+            let res = client
+                .get_coin_records_by_hint(*hint, None, None, Some(true))
+                .await
+                .map_err(|e| EngineError::Internal(format!("coinset hint: {e}")))?;
+            for r in res.coin_records.unwrap_or_default() {
+                if inner_phs_set.contains(&r.coin.puzzle_hash) {
+                    continue; // XCH receive — covered elsewhere
+                }
+                candidates.push((*hint, r));
+            }
+        }
+
+        // 3. For each candidate, fetch its PARENT's spend, parse via
+        //    Cat::parse_children, and find the child matching this coin.
+        let mut by_asset: std::collections::HashMap<Bytes32, CatBucket> =
+            std::collections::HashMap::new();
+
+        // Parent cache: avoid re-fetching when many siblings share a parent
+        let mut parent_cache: std::collections::HashMap<Bytes32, Option<Vec<Cat>>> =
+            std::collections::HashMap::new();
+
+        for (hint, rec) in &candidates {
+            let parent_id = rec.coin.parent_coin_info;
+            let children = match parent_cache.get(&parent_id) {
+                Some(v) => v.clone(),
+                None => {
+                    // Fetch parent record so we know which block to query
+                    // get_puzzle_and_solution against.
+                    let parent_rec = client
+                        .get_coin_record_by_name(parent_id)
+                        .await
+                        .map_err(|e| EngineError::Internal(format!("coinset parent: {e}")))?;
+                    let parent_rec = parent_rec.coin_record;
+                    let Some(parent_rec) = parent_rec else {
+                        parent_cache.insert(parent_id, None);
+                        continue;
+                    };
+                    if !parent_rec.spent {
+                        parent_cache.insert(parent_id, None);
+                        continue;
+                    }
+                    let spend = client
+                        .get_puzzle_and_solution(
+                            parent_id,
+                            Some(parent_rec.spent_block_index),
+                        )
+                        .await
+                        .map_err(|e| EngineError::Internal(format!("coinset puzzle: {e}")))?;
+                    let Some(coin_spend) = spend.coin_solution else {
+                        parent_cache.insert(parent_id, None);
+                        continue;
+                    };
+
+                    // Parse via chia-sdk-driver
+                    let mut ctx = SpendContext::new();
+                    let puzzle_ptr = node_from_bytes(
+                        &mut *ctx,
+                        coin_spend.puzzle_reveal.as_ref(),
+                    )
+                    .map_err(|e| EngineError::Internal(format!("clvm puzzle: {e}")))?;
+                    let solution_ptr = node_from_bytes(
+                        &mut *ctx,
+                        coin_spend.solution.as_ref(),
+                    )
+                    .map_err(|e| EngineError::Internal(format!("clvm solution: {e}")))?;
+                    let parent_puzzle = Puzzle::parse(&ctx, puzzle_ptr);
+                    let parsed = Cat::parse_children(
+                        &mut *ctx,
+                        coin_spend.coin,
+                        parent_puzzle,
+                        solution_ptr,
+                    )
+                    .map_err(|e| EngineError::Internal(format!("Cat::parse_children: {e}")))?;
+                    parent_cache.insert(parent_id, parsed.clone());
+                    parsed
+                }
+            };
+
+            let Some(children) = children else {
+                continue;
+            };
+            // Match the on-chain coin to the parsed child by coin_id.
+            let coin_id = rec.coin.coin_id();
+            let Some(child) = children.iter().find(|c| c.coin.coin_id() == coin_id) else {
+                continue;
+            };
+
+            let bucket = by_asset
+                .entry(child.info.asset_id)
+                .or_insert_with(|| CatBucket {
+                    asset_id: child.info.asset_id,
+                    coins: Vec::new(),
+                });
+            bucket.coins.push(CatCoinView {
+                coin_id,
+                parent_coin_info: rec.coin.parent_coin_info,
+                puzzle_hash: rec.coin.puzzle_hash,
+                amount: rec.coin.amount,
+                inner_puzzle_hash: child.info.p2_puzzle_hash,
+                hint: *hint,
+                confirmed_block_index: rec.confirmed_block_index,
+                spent: rec.spent,
+                spent_block_index: rec.spent_block_index,
+            });
+        }
+
+        // Emit per-asset rollups
+        let cats: Vec<_> = by_asset
+            .into_values()
+            .map(|b| {
+                let mut total_unspent: u128 = 0;
+                let mut unspent_count: u32 = 0;
+                let coins_json: Vec<_> = b
+                    .coins
+                    .iter()
+                    .map(|c| {
+                        if !c.spent {
+                            total_unspent =
+                                total_unspent.saturating_add(u128::from(c.amount));
+                            unspent_count = unspent_count.saturating_add(1);
+                        }
+                        serde_json::json!({
+                            "coin_id": format!("0x{}", hex::encode(c.coin_id)),
+                            "parent_coin_info": format!("0x{}", hex::encode(c.parent_coin_info)),
+                            "puzzle_hash": format!("0x{}", hex::encode(c.puzzle_hash)),
+                            "amount": c.amount.to_string(),
+                            "inner_puzzle_hash": format!("0x{}", hex::encode(c.inner_puzzle_hash)),
+                            "hint": format!("0x{}", hex::encode(c.hint)),
+                            "confirmed_block_index": c.confirmed_block_index,
+                            "spent": c.spent,
+                            "spent_block_index": c.spent_block_index,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "asset_id": format!("0x{}", hex::encode(b.asset_id)),
+                    "total_unspent_mojos": total_unspent.to_string(),
+                    "unspent_coin_count": unspent_count,
+                    "coins": coins_json,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::json!({
+            "cats": cats,
+            "scanned_inner_hashes": inner_phs.len(),
+            "testnet": req.testnet,
+        })
+        .to_string())
     }
 
     /// Send XCH: build a SpendBundle from one or more input coins, sign,
@@ -1420,6 +1641,24 @@ fn parse_bytes32(s: &str) -> Result<Bytes32, EngineError> {
         .try_into()
         .map_err(|_| EngineError::InvalidParams("expected 32 bytes".to_string()))?;
     Ok(Bytes32::from(arr))
+}
+
+struct CatBucket {
+    asset_id: Bytes32,
+    coins: Vec<CatCoinView>,
+}
+
+#[derive(Clone)]
+struct CatCoinView {
+    coin_id: Bytes32,
+    parent_coin_info: Bytes32,
+    puzzle_hash: Bytes32,
+    amount: u64,
+    inner_puzzle_hash: Bytes32,
+    hint: Bytes32,
+    confirmed_block_index: u32,
+    spent: bool,
+    spent_block_index: u32,
 }
 
 fn serialize_coin_spend(cs: &CoinSpend) -> serde_json::Value {
