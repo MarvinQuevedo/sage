@@ -67,22 +67,43 @@ impl SageEngine {
 
     pub async fn dispatch(&self, method: &str, params_json: &str) -> Result<String, EngineError> {
         match method {
-            "ping" => Ok(serde_json::json!({"pong": true}).to_string()),
+            // ─── Sage-aligned canonical names ─────────────────────────────
+            // These mirror the impl Sage::xxx surface in
+            // vendor/sage/crates/sage/src/endpoints/. Same Request/Response
+            // shapes from sage-api so a dApp / FFI / RPC caller can hit any
+            // transport with the same payload.
 
+            // Authentication & Keys
+            "login" => self.login(params_json).await,
+            "logout" => self.logout(params_json).await,
+            "import_key" => self.import_key(params_json).await,
+            "generate_mnemonic" => self.generate_mnemonic(params_json).await,
+            "get_keys" => self.get_keys(params_json).await,
+            "get_key" => self.get_key(params_json).await,
+            "get_sync_status" => self.get_sync_status(params_json).await,
+
+            // Addresses
+            "check_address" => self.check_address(params_json).await,
+
+            // Signing
+            "sign_message_with_public_key" => self.sign_message(params_json).await,
+
+            // ─── Pre-sage-api ad-hoc names (kept for our popup callers) ──
+            // These are aliases to the canonical methods above so the React
+            // popup keeps working while we migrate JS callers.
+            "ping" => Ok(serde_json::json!({"pong": true}).to_string()),
             "version" => Ok(serde_json::json!({
                 "engine": env!("CARGO_PKG_VERSION"),
                 "sage_api": "0.12.10",
             })
             .to_string()),
-
             "derive_address" => self.derive_address(params_json).await,
             "derive_addresses" => self.derive_addresses(params_json).await,
-            "decode_address" => self.decode_address(params_json).await,
-            "generate_mnemonic" => self.generate_mnemonic(params_json).await,
+            "decode_address" => self.check_address(params_json).await,
             "validate_mnemonic" => self.validate_mnemonic(params_json).await,
-            "import_mnemonic" => self.import_mnemonic(params_json).await,
-            "unlock_keychain" => self.unlock_keychain(params_json).await,
-            "lock_keychain" => self.lock_keychain(params_json).await,
+            "import_mnemonic" => self.import_key(params_json).await,
+            "unlock_keychain" => self.login(params_json).await,
+            "lock_keychain" => self.logout(params_json).await,
             "is_unlocked" => self.is_unlocked(params_json).await,
             "sign_message" => self.sign_message(params_json).await,
             "verify_signature" => self.verify_signature(params_json).await,
@@ -402,6 +423,141 @@ impl SageEngine {
         .to_string())
     }
 
+    /// Sage-aligned `get_keys`: list KeyInfo for every wallet the engine
+    /// knows about. The engine doesn't persist a wallet list (JS does that
+    /// in `chrome.storage.local`), so the JS side passes the encrypted
+    /// keychain blobs as an array; the engine decodes the master public
+    /// keys and synthesises a KeyInfo per fingerprint.
+    ///
+    /// Params: `{ "wallets": [{ "fingerprint": N, "keychain_blob": "hex",
+    ///                          "name"?: "...", "emoji"?: "..." }] }`.
+    /// Returns: `{ "keys": [KeyInfo] }`.
+    async fn get_keys(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct WalletEntry {
+            fingerprint: u32,
+            keychain_blob: String,
+            #[serde(default)]
+            name: Option<String>,
+            #[serde(default)]
+            emoji: Option<String>,
+        }
+        #[derive(Deserialize, Default)]
+        struct Req {
+            #[serde(default)]
+            wallets: Vec<WalletEntry>,
+        }
+        let req: Req = if params_json.trim().is_empty() || params_json == "{}" {
+            Req::default()
+        } else {
+            serde_json::from_str(params_json)
+                .map_err(|e| EngineError::InvalidParams(e.to_string()))?
+        };
+
+        let mut keys = Vec::with_capacity(req.wallets.len());
+        for w in req.wallets {
+            let info = self
+                .key_info_from_blob(w.fingerprint, &w.keychain_blob, w.name, w.emoji)
+                .await?;
+            keys.push(info);
+        }
+        Ok(serde_json::json!({ "keys": keys }).to_string())
+    }
+
+    /// Sage-aligned `get_key`: KeyInfo for a single wallet by fingerprint.
+    /// Same JS-passes-the-blob model as `get_keys`.
+    async fn get_key(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize)]
+        struct Req {
+            fingerprint: u32,
+            keychain_blob: String,
+            #[serde(default)]
+            name: Option<String>,
+            #[serde(default)]
+            emoji: Option<String>,
+        }
+        let req: Req = serde_json::from_str(params_json)
+            .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        let info = self
+            .key_info_from_blob(req.fingerprint, &req.keychain_blob, req.name, req.emoji)
+            .await?;
+        Ok(serde_json::json!({ "key": info }).to_string())
+    }
+
+    async fn key_info_from_blob(
+        &self,
+        fingerprint: u32,
+        keychain_blob: &str,
+        name: Option<String>,
+        emoji: Option<String>,
+    ) -> Result<serde_json::Value, EngineError> {
+        let blob = hex::decode(keychain_blob.trim_start_matches("0x"))
+            .map_err(|e| EngineError::InvalidParams(format!("keychain_blob hex: {e}")))?;
+        let keychain = Keychain::from_bytes(&blob)
+            .map_err(|e| EngineError::InvalidParams(format!("keychain decode: {e}")))?;
+        let pk = keychain
+            .extract_public_key(fingerprint)
+            .map_err(|e| EngineError::Internal(e.to_string()))?
+            .ok_or_else(|| {
+                EngineError::InvalidParams(format!("fingerprint {fingerprint} not in keychain"))
+            })?;
+        let has_secrets = keychain.has_secret_key(fingerprint);
+        let unlocked = self
+            .unlocked
+            .lock()
+            .map(|g| g.contains_key(&fingerprint))
+            .unwrap_or(false);
+        Ok(serde_json::json!({
+            "name": name.unwrap_or_else(|| format!("Wallet {fingerprint}")),
+            "fingerprint": fingerprint,
+            "public_key": format!("0x{}", hex::encode(pk.to_bytes())),
+            "kind": if has_secrets { "Hd" } else { "PublicOnly" },
+            "has_secrets": has_secrets,
+            "network_id": "mainnet",
+            "emoji": emoji,
+            "arbor_only": false,
+            "unlocked": unlocked,
+        }))
+    }
+
+    /// Sage-aligned `get_sync_status` (lightweight). Native sage reads from
+    /// the DB; we don't have storage wired yet so we report what we can
+    /// from the engine + the most recent sync_tick snapshot (no balance
+    /// numbers — those come from the JS-side coin-store today).
+    async fn get_sync_status(&self, params_json: &str) -> Result<String, EngineError> {
+        #[derive(Deserialize, Default)]
+        struct Req {
+            #[serde(default)]
+            endpoint: Option<String>,
+        }
+        let req: Req = if params_json.trim().is_empty() || params_json == "{}" {
+            Req::default()
+        } else {
+            serde_json::from_str(params_json).unwrap_or_default()
+        };
+        let client = make_client(req.endpoint.as_deref());
+        let state = client
+            .get_blockchain_state()
+            .await
+            .map_err(|e| EngineError::Internal(format!("coinset rpc: {e}")))?;
+        let body = state
+            .blockchain_state
+            .ok_or_else(|| EngineError::Internal("empty blockchain state".to_string()))?;
+        Ok(serde_json::json!({
+            "balance": "0",
+            "unit_decimals": 12,
+            "unit_ticker": "XCH",
+            "synced_coins": 0,
+            "total_coins": 0,
+            "receive_address": "",
+            "burn_address": "",
+            "header_hash": format!("0x{}", hex::encode(body.peak.header_hash)),
+            "synced": body.sync.synced,
+            "peak_height": body.peak.height,
+        })
+        .to_string())
+    }
+
     /// Check whether a BIP-39 phrase parses + has a valid checksum.
     ///
     /// Params: `{ "mnemonic": "..." }`.
@@ -517,24 +673,33 @@ impl SageEngine {
         Ok(serde_json::json!({ "addresses": out }).to_string())
     }
 
-    /// Parse a bech32m Chia address into its puzzle hash + prefix.
+    /// Validate a Chia bech32m address.
     ///
-    /// Params: `{ "address": "xch1..." }`.
-    /// Returns: `{ "puzzle_hash": "0x...", "prefix": "xch" | "txch" }`.
-    async fn decode_address(&self, params_json: &str) -> Result<String, EngineError> {
+    /// Matches sage's `check_address` — returns `{ valid: bool }`. Extended
+    /// with `puzzle_hash` + `prefix` when the address is valid so callers
+    /// don't have to make a second roundtrip to parse it.
+    ///
+    /// Params: `{ "address": "xch1..." }` (sage-api `CheckAddress`).
+    async fn check_address(&self, params_json: &str) -> Result<String, EngineError> {
         #[derive(Deserialize)]
         struct Req {
             address: String,
         }
         let req: Req = serde_json::from_str(params_json)
             .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
-        let parsed = Address::decode(req.address.trim())
-            .map_err(|e| EngineError::InvalidParams(format!("bech32m: {e}")))?;
-        Ok(serde_json::json!({
-            "puzzle_hash": format!("0x{}", hex::encode(parsed.puzzle_hash)),
-            "prefix": parsed.prefix,
-        })
-        .to_string())
+        match Address::decode(req.address.trim()) {
+            Ok(parsed) => Ok(serde_json::json!({
+                "valid": true,
+                "puzzle_hash": format!("0x{}", hex::encode(parsed.puzzle_hash)),
+                "prefix": parsed.prefix,
+            })
+            .to_string()),
+            Err(e) => Ok(serde_json::json!({
+                "valid": false,
+                "error": e.to_string(),
+            })
+            .to_string()),
+        }
     }
 
     /// One sync poll against the configured Chia RPC backend.
@@ -580,18 +745,19 @@ impl SageEngine {
 
     /// Generate a new BIP-39 mnemonic.
     ///
-    /// Params: `{ "words": 12 | 24 }` (default 24).
+    /// Sage-compatible params: `{ "use_24_words": true }`.
+    /// Extended params: `{ "words": 12|15|18|21|24 }`.
     /// Returns: `{ "mnemonic": "...", "word_count": N }`.
     async fn generate_mnemonic(&self, params_json: &str) -> Result<String, EngineError> {
         #[derive(Deserialize, Default)]
         struct Req {
-            #[serde(default = "default_words")]
-            words: u8,
+            /// Sage native field — true = 24 words, false = 12.
+            #[serde(default)]
+            use_24_words: Option<bool>,
+            /// Extended: exact word count (12/15/18/21/24).
+            #[serde(default)]
+            words: Option<u8>,
         }
-        fn default_words() -> u8 {
-            24
-        }
-
         let req: Req = if params_json.trim().is_empty() || params_json == "{}" {
             Req::default()
         } else {
@@ -599,7 +765,12 @@ impl SageEngine {
                 .map_err(|e| EngineError::InvalidParams(e.to_string()))?
         };
 
-        match req.words {
+        let count = match (req.words, req.use_24_words) {
+            (Some(n), _) => n,
+            (None, Some(true)) | (None, None) => 24,
+            (None, Some(false)) => 12,
+        };
+        match count {
             12 | 15 | 18 | 21 | 24 => {}
             other => {
                 return Err(EngineError::InvalidParams(format!(
@@ -608,16 +779,11 @@ impl SageEngine {
             }
         }
 
-        // `bip39::Mnemonic::generate` uses `rand`'s `thread_rng()` under the
-        // hood, which is satisfied by `rand`'s `getrandom` backend selection.
-        // We've already declared the proper getrandom features for wasm32 in
-        // sage-wallet's target-conditional deps; native uses the OS RNG.
-        let mnemonic = Mnemonic::generate(req.words as usize)
+        let mnemonic = Mnemonic::generate(count as usize)
             .map_err(|e| EngineError::Internal(e.to_string()))?;
-
         Ok(serde_json::json!({
             "mnemonic": mnemonic.to_string(),
-            "word_count": req.words,
+            "word_count": count,
         })
         .to_string())
     }
@@ -628,26 +794,71 @@ impl SageEngine {
     /// The blob lives in `chrome.storage.local` keyed by fingerprint; the
     /// engine never persists it itself.
     ///
-    /// Params: `{ "mnemonic": "...", "password": "..." }`.
-    /// Returns: `{ "fingerprint": N, "master_public_key": "0x...",
-    ///             "keychain_blob": "hex...", "address_0": "xch1..." }`.
-    async fn import_mnemonic(&self, params_json: &str) -> Result<String, EngineError> {
+    /// Sage native uses `ImportKey { name, key, derivation_index, save_secrets }`
+    /// where `key` is the mnemonic. We accept either field (`key` matches
+    /// sage, `mnemonic` matches our older shape).
+    ///
+    /// Params (any of the following work):
+    ///   `{ "mnemonic": "...", "password": "...", "testnet"?: bool, "name"?: "..." }`
+    ///   `{ "key":       "...", "password": "...", "testnet"?: bool, "name"?: "..." }`
+    ///
+    /// Returns: `{ "fingerprint", "master_public_key", "keychain_blob",
+    ///             "address_0", "name"? }`.
+    async fn import_key(&self, params_json: &str) -> Result<String, EngineError> {
         #[derive(Deserialize)]
         struct Req {
-            mnemonic: String,
+            // Accept both names.
+            #[serde(default)]
+            mnemonic: Option<String>,
+            #[serde(default)]
+            key: Option<String>,
             password: String,
             #[serde(default)]
             testnet: bool,
+            #[serde(default)]
+            name: Option<String>,
         }
         let req: Req = serde_json::from_str(params_json)
             .map_err(|e| EngineError::InvalidParams(e.to_string()))?;
+        let mnemonic_input = req
+            .key
+            .as_deref()
+            .or(req.mnemonic.as_deref())
+            .ok_or_else(|| {
+                EngineError::InvalidParams("missing `mnemonic` or `key` field".to_string())
+            })?;
+        let password = req.password;
+        let testnet = req.testnet;
+        let name = req.name;
+        return self.do_import_key(mnemonic_input, &password, testnet, name).await;
+    }
 
-        let mnemonic = Mnemonic::parse(req.mnemonic.trim())
+    /// Legacy entrypoint that still expects only the old-shape body.
+    async fn do_import_key(
+        &self,
+        mnemonic_str: &str,
+        password: &str,
+        testnet: bool,
+        name: Option<String>,
+    ) -> Result<String, EngineError> {
+        #[allow(dead_code)]
+        struct Req {
+            mnemonic: String,
+            password: String,
+            testnet: bool,
+        }
+        let _ = Req {
+            mnemonic: String::new(),
+            password: String::new(),
+            testnet: false,
+        };
+
+        let mnemonic = Mnemonic::parse(mnemonic_str.trim())
             .map_err(|e| EngineError::InvalidParams(format!("mnemonic: {e}")))?;
 
         let mut keychain = Keychain::default();
         let fingerprint = keychain
-            .add_mnemonic(&mnemonic, req.password.as_bytes())
+            .add_mnemonic(&mnemonic, password.as_bytes())
             .map_err(|e| EngineError::Internal(e.to_string()))?;
         let blob = keychain
             .to_bytes()
@@ -659,7 +870,7 @@ impl SageEngine {
         let intermediate_pk = master_to_wallet_unhardened(&master_sk.public_key(), 0);
         let synthetic_pk = intermediate_pk.derive_synthetic();
         let puzzle_hash: Bytes32 = StandardArgs::curry_tree_hash(synthetic_pk).into();
-        let prefix = if req.testnet { "txch" } else { "xch" };
+        let prefix = if testnet { "txch" } else { "xch" };
         let address_0 = Address::new(puzzle_hash, prefix.to_string())
             .encode()
             .map_err(|e| EngineError::Internal(format!("bech32m: {e}")))?;
@@ -669,18 +880,23 @@ impl SageEngine {
             "master_public_key": format!("0x{}", hex::encode(master_sk.public_key().to_bytes())),
             "keychain_blob": hex::encode(&blob),
             "address_0": address_0,
+            "name": name,
         })
         .to_string())
     }
 
-    /// Verify a password unlocks a keychain blob and return the public key
-    /// + mnemonic for the requested fingerprint. The mnemonic is returned
-    /// so the popup can show "this is your seed" if the user opts in, and
-    /// so the engine can hold the master SK in memory for signing.
+    /// Sage-aligned `login`. Decrypts a keychain blob with the password and
+    /// caches the master SK in memory for the given fingerprint. Returns
+    /// the unlocked KeyInfo plus the mnemonic (for the popup's
+    /// "show recovery phrase" flow).
+    ///
+    /// In native sage `login` only takes `{fingerprint}` because the
+    /// keychain lives on disk; in WASM the blob lives in JS storage so
+    /// the JS side passes both.
     ///
     /// Params: `{ "keychain_blob": "hex...", "fingerprint": N, "password": "..." }`.
     /// Returns: `{ "fingerprint": N, "mnemonic": "...", "master_public_key": "0x..." }`.
-    async fn unlock_keychain(&self, params_json: &str) -> Result<String, EngineError> {
+    async fn login(&self, params_json: &str) -> Result<String, EngineError> {
         #[derive(Deserialize)]
         struct Req {
             keychain_blob: String,
@@ -775,9 +991,10 @@ impl SageEngine {
         .to_string())
     }
 
-    /// Clear the cached SK for one fingerprint (or all if `fingerprint`
-    /// omitted). Called when the user locks the popup.
-    async fn lock_keychain(&self, params_json: &str) -> Result<String, EngineError> {
+    /// Sage-aligned `logout`. Clears the cached SK for one fingerprint
+    /// (or all if omitted). Native sage takes no params; we accept an
+    /// optional `fingerprint` for multi-wallet scoping.
+    async fn logout(&self, params_json: &str) -> Result<String, EngineError> {
         #[derive(Deserialize, Default)]
         struct Req {
             fingerprint: Option<u32>,
